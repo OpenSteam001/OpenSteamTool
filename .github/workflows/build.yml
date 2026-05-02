@@ -1,0 +1,80 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. v1.0.0)"
+        required: true
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: cmake -S src -B build -G "Ninja Multi-Config"
+
+      - name: Build Release
+        run: cmake --build build --config Release
+
+      - name: Build Debug
+        run: cmake --build build --config Debug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenSteamTool-Release
+          path: build/Release/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenSteamTool-Debug
+          path: build/Debug/
+
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          {
+            echo 'changelog<<EOF'
+            git log -1 --pretty=format:"- %s%n%b"
+            echo ''
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
+      - name: Create tag
+        run: |
+          git tag ${{ github.event.inputs.version }}
+          git push origin ${{ github.event.inputs.version }}
+
+      - name: Package Release
+        run: 7z a OpenSteamTool-${{ github.event.inputs.version }}-Release.zip ".\build\Release\*" -mx5
+
+      - name: Package Debug
+        run: 7z a OpenSteamTool-${{ github.event.inputs.version }}-Debug.zip ".\build\Debug\*" -mx5
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          body: |
+            ## Changes
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ## Installation
+
+            Download `OpenSteamTool-${{ github.event.inputs.version }}-Release.zip` (or the `-Debug` variant if you need logging to `opensteamtool.log`).
+
+            Extract and copy both `dwmapi.dll` and `OpenSteamTool.dll` to your Steam root directory (e.g. `C:\Program Files (x86)\Steam`).
+
+            Create a Lua config directory (for example `C:\Program Files (x86)\Steam\config\lua`) and place your Lua scripts there. **NOT** `C:\Program Files (x86)\Steam\config\stplug-in`!
+          files: |
+            OpenSteamTool-${{ github.event.inputs.version }}-Release.zip
+            OpenSteamTool-${{ github.event.inputs.version }}-Debug.zip
