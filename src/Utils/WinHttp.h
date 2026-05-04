@@ -40,4 +40,13 @@ namespace WinHttp {
                    DWORD timeoutSend    = 10000,
                    DWORD timeoutRecv    = 10000);
 
+    // Reuse caller-owned hSession + hConnect handles to skip DNS/TCP/TLS
+    // setup on repeated requests to the same host.  The caller is
+    // responsible for the lifetime of both handles.
+    Result ExecuteEx(HINTERNET hSession, HINTERNET hConnect, bool tls,
+                     LPCWSTR method, const wchar_t* path,
+                     const void* reqBody, DWORD reqBodyLen,
+                     const wchar_t* headers,
+                     const char* urlForLog = "");
+
 }

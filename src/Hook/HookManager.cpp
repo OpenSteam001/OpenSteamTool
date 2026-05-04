@@ -14,7 +14,7 @@
 namespace SteamClient {
 
     void CoreHook() {
-        Hooks_AccessToken::Install();
+        // Hooks_AccessToken::Install();  // migrated to Hooks_NetPacket (PICS)
         Hooks_AppState::Install();
         // Hooks_AppTicket::Install();
         Hooks_Decryption::Install();
@@ -27,7 +27,7 @@ namespace SteamClient {
     }
 
     void CoreUnhook() {
-        Hooks_AccessToken::Uninstall();
+        // Hooks_AccessToken::Uninstall();  // migrated to Hooks_NetPacket (PICS)
         Hooks_AppState::Uninstall();
         // Hooks_AppTicket::Uninstall();
         Hooks_Decryption::Uninstall();

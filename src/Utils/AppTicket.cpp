@@ -50,6 +50,11 @@ namespace AppTicket {
 
     std::vector<uint8_t> GetAppOwnershipTicketFromRegistry(AppId_t appId) {
         LOG_TRACE("AppId={}", appId);
+        // exclude those appids that are not in addappid
+        if (!LuaConfig::HasDepot(appId)) {
+            LOG_DEBUG("GetAppOwnershipTicketFromRegistry for AppId {}: not in addappid, skip", appId);
+            return {};
+        }
         std::vector<uint8_t> empty{};
         HKEY hKey;
         const std::string regPath = "Software\\Valve\\Steam\\Apps\\" + std::to_string(appId);
@@ -72,9 +77,13 @@ namespace AppTicket {
         return value;
     }
 
-
     std::vector<uint8_t> GetEncryptedTicketFromRegistry(AppId_t appId) {
         LOG_DEBUG("appid={}", appId);    
+        // exclude those appids that are not in addappid
+        if (!LuaConfig::HasDepot(appId)) {
+            LOG_DEBUG("GetAppOwnershipTicketFromRegistry for AppId {}: not in addappid, skip", appId);
+            return {};
+        }
         std::vector<uint8_t> empty{};
         HKEY hKey;
         const std::string regPath = "Software\\Valve\\Steam\\Apps\\" + std::to_string(appId);
@@ -98,6 +107,7 @@ namespace AppTicket {
     }
 
     bool WriteAppOwnershipTicket(AppId_t appId, const std::vector<uint8_t>& data) {
+        // we can't execlude appids here 
         HKEY hKey;
         const std::string regPath = "Software\\Valve\\Steam\\Apps\\" + std::to_string(appId);
         DWORD disposition;
@@ -116,6 +126,7 @@ namespace AppTicket {
     }
 
     bool WriteEncryptedTicket(AppId_t appId, const std::vector<uint8_t>& data) {
+        // we can't execlude appids here 
         HKEY hKey;
         const std::string regPath = "Software\\Valve\\Steam\\Apps\\" + std::to_string(appId);
         DWORD disposition;
@@ -134,6 +145,11 @@ namespace AppTicket {
     }
 
     uint64_t GetSpoofSteamID(AppId_t appId) {
+        // exclude those appids that are not in addappid
+        if (!LuaConfig::HasDepot(appId)) {
+            LOG_DEBUG("GetSpoofSteamID for AppId {}: not in addappid, skip spoofing", appId);
+            return 0;
+        }
         const uint64_t registrySteamID = GetSteamIDFromRegistryString(appId);
         if (registrySteamID != 0) {
             return registrySteamID;

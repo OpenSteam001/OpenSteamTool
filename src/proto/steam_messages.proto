@@ -2,7 +2,6 @@
 // Steam protobuf response message definitions for OpenSteamTool.
 
 syntax = "proto2";
-option optimize_for = LITE_RUNTIME;
 
 // ============================================================
 // CMsgProtoBufHeader
@@ -131,4 +130,59 @@ message CMsgClientSharedLibraryStopPlaying {
 message CMsgClientSharedLibraryStopPlaying_StopApp {
 	optional uint32 app_id = 1;
 	optional uint32 owner_id = 2;
+}
+
+// ============================================================
+// CPlayer_GetUserStats  
+// ============================================================
+//ServiceMethodCallFromClient (151)
+message CPlayer_GetUserStats_Request {
+	optional uint64 steamid = 1;
+	optional uint32 appid = 2;
+	optional bytes sha_schema = 3;
+	optional uint32 crc_stats = 4;
+}
+
+message CPlayer_GetUserStats_Response {
+	message Unlock_Time {
+		optional uint32 achievement_bit = 1;
+		optional fixed32 unlock_time = 2;
+	}
+
+	message Stats {
+		optional uint32 stat_id = 1;
+		optional uint32 stat_value = 2;
+		repeated .CPlayer_GetUserStats_Response.Unlock_Time unlock_times = 3;
+	}
+
+	optional bytes sha_schema = 1;
+	optional uint32 crc_stats = 2;
+	optional bytes schema = 3;
+	repeated .CPlayer_GetUserStats_Response.Stats stats = 4;
+}
+
+message CMsgClientGetUserStats {
+	optional fixed64 game_id = 1;
+	optional uint32 crc_stats = 2;
+	optional int32 schema_local_version = 3;
+	optional fixed64 steam_id_for_user = 4;
+}
+
+message CMsgClientGetUserStatsResponse {
+	message Stats {
+		optional uint32 stat_id = 1;
+		optional uint32 stat_value = 2;
+	}
+
+	message Achievement_Blocks {
+		optional uint32 achievement_id = 1;
+		repeated fixed32 unlock_time = 2;
+	}
+
+	optional fixed64 game_id = 1;
+	optional int32 eresult = 2 [default = 2];
+	optional uint32 crc_stats = 3;
+	optional bytes schema = 4;
+	repeated .CMsgClientGetUserStatsResponse.Stats stats = 5;
+	repeated .CMsgClientGetUserStatsResponse.Achievement_Blocks achievement_blocks = 6;
 }

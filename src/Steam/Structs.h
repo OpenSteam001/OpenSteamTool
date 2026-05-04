@@ -165,3 +165,26 @@ struct CNetPacket
 	uint8* m_pubNetworkBuffer;
 	CNetPacket* m_pNext;
 };
+
+struct MsgHdr
+{
+	EMsg eMsg;               // actual_eMsg | 0x80000000
+	uint32 headerLength;
+};
+
+// High bit of eMsg discriminates protobuf vs extended header.
+constexpr uint32 kMsgHdrProtoFlag = 0x80000000;
+
+#pragma pack(push,1)
+struct ExtendedMsgHdr
+{
+	EMsg eMsg;
+	uint8 m_nCubHdr;
+	uint16 m_nHdrVersion;
+	JobID_t m_JobIDTarget;
+	JobID_t m_JobIDSource;
+	uint8 m_nHdrCanary;
+	uint64 m_ulSteamID;
+	int32 m_nSessionID;
+};
+#pragma pack(pop)

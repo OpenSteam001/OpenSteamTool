@@ -24,9 +24,12 @@ typedef uint32 HCONNECTION;
 typedef int32 HSteamPipe;
 typedef int32 HSteamUser;
 
+typedef uint64 GID_t;
+typedef GID_t JobID_t;
 
 constexpr AppId_t k_uAppIdInvalid = 0x0;
 constexpr PackageId_t k_uPackageIdFreeSub = 0x0;
 constexpr PackageId_t k_uPackageIdInvalid = 0xFFFFFFFF;
 constexpr PackageId_t k_uPackageIdWallet = -2;
 constexpr PackageId_t k_uPackageIdMicroTxn = -3;
+constexpr GID_t k_GIDNil = 0xffffffffffffffffull;

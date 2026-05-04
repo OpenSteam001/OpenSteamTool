@@ -1706,6 +1706,7 @@ enum class EIPCCommand : uint8
 	InterfaceCall  = 1,  // call into a Steam interface (IClientUser, IClientApps, ...)
 	FlushCallbacks = 2,  // SerializeCallbacks
 	Destroy        = 5,
+	Heartbeat      = 6,  // sent by steamclient to check if the IPC server is still alive
 	Handshake      = 9,  // SteamApi_Init
 };
 
@@ -1775,3 +1776,109 @@ enum class EIPCInterface : uint8
 	IClientSystemDisplayManager          = 60,
 	IClientTimeline                      = 61,
 };
+
+inline const char* EIPCCommandName(EIPCCommand cmd) {
+	switch (cmd) {
+	case EIPCCommand::InterfaceCall:  return "InterfaceCall";
+	case EIPCCommand::FlushCallbacks: return "FlushCallbacks";
+	case EIPCCommand::Destroy:        return "Destroy";
+	case EIPCCommand::Heartbeat:      return "Heartbeat";
+	case EIPCCommand::Handshake:      return "Handshake";
+	default: 
+		{
+			static thread_local char buf[4];
+			uint8 v = static_cast<uint8>(cmd);
+			if (v >= 100) { 
+				buf[0]='0'+v/100; 
+				buf[1]='0'+(v/10)%10; 
+				buf[2]='0'+v%10; 
+				buf[3]=0; 
+			}
+			else if (v >= 10) { 
+				buf[0]='0'+v/10; 
+				buf[1]='0'+v%10; 
+				buf[2]=0; 
+			}				
+			else { 
+				buf[0]='0'+v; 
+				buf[1]=0; 
+			}
+			return buf;
+		}
+	}
+}
+
+inline const char* EIPCInterfaceName(EIPCInterface iface) {
+	switch (iface) {
+	case EIPCInterface::IClientUser:                 return "IClientUser";
+	case EIPCInterface::IClientGameServer:           return "IClientGameServer";
+	case EIPCInterface::IClientFriends:              return "IClientFriends";
+	case EIPCInterface::IClientUtils:                return "IClientUtils";
+	case EIPCInterface::IClientBilling:              return "IClientBilling";
+	case EIPCInterface::IClientMatchmaking:          return "IClientMatchmaking";
+	case EIPCInterface::IClientApps:                 return "IClientApps";
+	case EIPCInterface::IClientUserStats:            return "IClientUserStats";
+	case EIPCInterface::IClientNetworking:           return "IClientNetworking";
+	case EIPCInterface::IClientRemoteStorage:        return "IClientRemoteStorage";
+	case EIPCInterface::IClientDepotBuilder:         return "IClientDepotBuilder";
+	case EIPCInterface::IClientAppManager:           return "IClientAppManager";
+	case EIPCInterface::IClientConfigStore:          return "IClientConfigStore";
+	case EIPCInterface::IClientGameCoordinator:      return "IClientGameCoordinator";
+	case EIPCInterface::IClientGameServerStats:      return "IClientGameServerStats";
+	case EIPCInterface::IClientGameStats:            return "IClientGameStats";
+	case EIPCInterface::IClientHTTP:                 return "IClientHTTP";
+	case EIPCInterface::IClientScreenshots:          return "IClientScreenshots";
+	case EIPCInterface::IClientAudio:                return "IClientAudio";
+	case EIPCInterface::IClientUnifiedMessages:      return "IClientUnifiedMessages";
+	case EIPCInterface::IClientStreamLauncher:       return "IClientStreamLauncher";
+	case EIPCInterface::IClientParentalSettings:     return "IClientParentalSettings";
+	case EIPCInterface::IClientNetworkDeviceManager: return "IClientNetworkDeviceManager";
+	case EIPCInterface::IClientMusic:                return "IClientMusic";
+	case EIPCInterface::IClientRemoteClientManager:  return "IClientRemoteClientManager";
+	case EIPCInterface::IClientUGC:                  return "IClientUGC";
+	case EIPCInterface::IClientStreamClient:         return "IClientStreamClient";
+	case EIPCInterface::IClientProductBuilder:       return "IClientProductBuilder";
+	case EIPCInterface::IClientShortcuts:            return "IClientShortcuts";
+	case EIPCInterface::IClientGameNotifications:    return "IClientGameNotifications";
+	case EIPCInterface::IClientVideo:                return "IClientVideo";
+	case EIPCInterface::IClientInventory:            return "IClientInventory";
+	case EIPCInterface::IClientVR:                   return "IClientVR";
+	case EIPCInterface::IClientControllerSerialized: return "IClientControllerSerialized";
+	case EIPCInterface::IClientAppDisableUpdate:     return "IClientAppDisableUpdate";
+	case EIPCInterface::IClientSharedConnection:     return "IClientSharedConnection";
+	case EIPCInterface::IClientShader:               return "IClientShader";
+	case EIPCInterface::IClientNetworkingSocketsSerialized: return "IClientNetworkingSocketsSerialized";
+	case EIPCInterface::IClientCompat:               return "IClientCompat";
+	case EIPCInterface::IClientParties:              return "IClientParties";
+	case EIPCInterface::IClientNetworkingUtilsSerialized: return "IClientNetworkingUtilsSerialized";
+	case EIPCInterface::IClientRemotePlay:           return "IClientRemotePlay";
+	case EIPCInterface::IClientGameServerPacketHandler: return "IClientGameServerPacketHandler";
+	case EIPCInterface::IClientSystemManager:        return "IClientSystemManager";
+	case EIPCInterface::IClientSystemPerfManager:    return "IClientSystemPerfManager";
+	case EIPCInterface::IClientSystemDockManager:    return "IClientSystemDockManager";
+	case EIPCInterface::IClientSystemAudioManager:   return "IClientSystemAudioManager";
+	case EIPCInterface::IClientSystemDisplayManager: return "IClientSystemDisplayManager";
+	case EIPCInterface::IClientTimeline:             return "IClientTimeline";
+	default: 
+		{
+			static thread_local char buf[4];
+			uint8 v = static_cast<uint8>(iface);
+			if (v >= 100) { 
+				buf[0]='0'+v/100; 
+				buf[1]='0'+(v/10)%10; 
+				buf[2]='0'+v%10; 
+				buf[3]=0; 
+			}
+			else if (v >= 10) { 
+				buf[0]='0'+v/10; 
+				buf[1]='0'+v%10; 
+				buf[2]=0; 
+			}				
+			else { 
+				buf[0]='0'+v; 
+				buf[1]=0; 
+			}
+			return buf;
+		}
+	}
+}

@@ -95,6 +95,18 @@ namespace Log {
 #define LOG_WINHTTP_WARN(...)     SPDLOG_LOGGER_WARN(Log::WinHttp, __VA_ARGS__)
 #define LOG_WINHTTP_ERROR(...)    SPDLOG_LOGGER_ERROR(Log::WinHttp, __VA_ARGS__)
 
+#define LOG_ACHIEVEMENT_TRACE(...)  SPDLOG_LOGGER_TRACE(Log::Achievement, __VA_ARGS__)
+#define LOG_ACHIEVEMENT_DEBUG(...)  SPDLOG_LOGGER_DEBUG(Log::Achievement, __VA_ARGS__)
+#define LOG_ACHIEVEMENT_INFO(...)   SPDLOG_LOGGER_INFO(Log::Achievement, __VA_ARGS__)
+#define LOG_ACHIEVEMENT_WARN(...)   SPDLOG_LOGGER_WARN(Log::Achievement, __VA_ARGS__)
+#define LOG_ACHIEVEMENT_ERROR(...)  SPDLOG_LOGGER_ERROR(Log::Achievement, __VA_ARGS__)
+
+#define LOG_PICS_TRACE(...)  SPDLOG_LOGGER_TRACE(Log::Pics, __VA_ARGS__)
+#define LOG_PICS_DEBUG(...)  SPDLOG_LOGGER_DEBUG(Log::Pics, __VA_ARGS__)
+#define LOG_PICS_INFO(...)   SPDLOG_LOGGER_INFO(Log::Pics, __VA_ARGS__)
+#define LOG_PICS_WARN(...)   SPDLOG_LOGGER_WARN(Log::Pics, __VA_ARGS__)
+#define LOG_PICS_ERROR(...)  SPDLOG_LOGGER_ERROR(Log::Pics, __VA_ARGS__)
+
 #else  // OPENSTEAMTOOL_LOGGING_ENABLED
 
 #include <windows.h>
@@ -151,5 +163,17 @@ namespace Log {
 #define LOG_WINHTTP_INFO(...)     ((void)0)
 #define LOG_WINHTTP_WARN(...)     ((void)0)
 #define LOG_WINHTTP_ERROR(...)    ((void)0)
+
+#define LOG_ACHIEVEMENT_TRACE(...)  ((void)0)
+#define LOG_ACHIEVEMENT_DEBUG(...)  ((void)0)
+#define LOG_ACHIEVEMENT_INFO(...)   ((void)0)
+#define LOG_ACHIEVEMENT_WARN(...)   ((void)0)
+#define LOG_ACHIEVEMENT_ERROR(...)  ((void)0)
+
+#define LOG_PICS_TRACE(...)  ((void)0)
+#define LOG_PICS_DEBUG(...)  ((void)0)
+#define LOG_PICS_INFO(...)   ((void)0)
+#define LOG_PICS_WARN(...)   ((void)0)
+#define LOG_PICS_ERROR(...)  ((void)0)
 
 #endif  // OPENSTEAMTOOL_LOGGING_ENABLED

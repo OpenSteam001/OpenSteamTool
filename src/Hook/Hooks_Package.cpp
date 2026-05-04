@@ -24,10 +24,15 @@ namespace {
     HOOK_FUNC(CheckAppOwnership, bool, void* pObj, AppId_t appId, AppOwnership* pOwn) {
         bool result = oCheckAppOwnership(pObj, appId, pOwn);
         if (LuaConfig::HasDepot(appId)) {
-            pOwn->PackageId    = 0;
-            pOwn->ReleaseState = EAppReleaseState::Released;
-            pOwn->GameIDType   = EGameIDType::k_EGameIDTypeApp;
-            return true;
+            if (result && pOwn->ExistInPackageNums > 1) {
+                // Actually owned — record so HasDepot excludes it going forward
+                LuaConfig::MarkOwned(appId);
+            } else {
+                pOwn->PackageId    = 0;
+                pOwn->ReleaseState = EAppReleaseState::Released;
+                pOwn->GameIDType   = EGameIDType::k_EGameIDTypeApp;
+                return true;
+            }
         }
         return result;
     }

@@ -18,6 +18,9 @@ namespace LuaConfig{
     std::unordered_map<AppId_t, uint64_t>AccessTokenSet{};
     std::unordered_set<AppId_t> PinnedApps{};
     std::unordered_map<uint64_t, ManifestOverride> ManifestOverrides{};
+    std::unordered_map<AppId_t, uint64_t> StatSteamIdSet{};
+    std::unordered_set<AppId_t> OwnedAppIdSet{};
+    constexpr uint64_t kDefaultStatSteamId = 76561198028121353ULL;
 
     // Case-insensitive function registry: lowercase name → C function
     static std::unordered_map<std::string, lua_CFunction> g_func_registry;
@@ -298,6 +301,30 @@ namespace LuaConfig{
     }
 
     
+    // ── Lua: setStat ────────────────────────────────────────────
+    static int lua_setStat(lua_State* L) {
+        // setStat(appid, "steamid")
+        int argc = lua_gettop(L);
+        if (argc < 2)
+            return luaL_error(L, "setStat: need appId and steamId string");
+        if (!lua_isinteger(L, 1))
+            return luaL_error(L, "setStat: appId must be integer");
+        if (!lua_isstring(L, 2))
+            return luaL_error(L, "setStat: steamId must be string");
+
+        lua_Integer val = lua_tointeger(L, 1);
+        if (val < 0 || val > UINT32_MAX)
+            return luaL_error(L, "setStat: appId out of range");
+        AppId_t appId = static_cast<uint32_t>(val);
+
+        const char* sidStr = lua_tostring(L, 2);
+        if (!std::all_of(sidStr, sidStr + strlen(sidStr), ::isdigit))
+            return luaL_error(L, "setStat: steamId must be all digits");
+
+        StatSteamIdSet[appId] = std::stoull(sidStr);
+        return 0;
+    }
+
     // ── init / cleanup ───────────────────────────────────────────
     static bool Initialize() {
         if (g_lua_state)
@@ -330,6 +357,7 @@ namespace LuaConfig{
         register_func(g_lua_state, "http_post", lua_http_post);
         register_func(g_lua_state, "setappticket", lua_setAppticket);
         register_func(g_lua_state, "seteticket", lua_setEticket);
+        register_func(g_lua_state, "setstat", lua_setStat);
         return true;
     }
 
@@ -343,7 +371,14 @@ namespace LuaConfig{
 
     // ── public query API ─────────────────────────────────────────
     bool HasDepot(AppId_t DepotId) {
-        return DepotKeySet.count(DepotId);
+        return DepotKeySet.count(DepotId) && !OwnedAppIdSet.count(DepotId);
+    }
+
+    void MarkOwned(AppId_t AppId) {
+        if(!OwnedAppIdSet.count(AppId)) {
+            LOG_INFO("Marking app {} as owned", AppId);
+            OwnedAppIdSet.insert(AppId);
+        }
     }
 
     std::vector<AppId_t> GetAllDepotIds() {
@@ -377,6 +412,12 @@ namespace LuaConfig{
 
     bool pinApp(AppId_t AppId) {
         return PinnedApps.count(AppId);
+    }
+
+    uint64_t GetStatSteamId(AppId_t AppId) {
+        if (StatSteamIdSet.count(AppId))
+            return StatSteamIdSet[AppId];
+        return kDefaultStatSteamId;
     }
 
     const std::unordered_map<uint64_t, ManifestOverride>& GetManifestOverrides() {

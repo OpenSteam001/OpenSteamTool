@@ -98,6 +98,9 @@ namespace {
             LOG_KEYVALUE_INFO("Patched depot {} manifest branch '{}': gid={} size={}", depotId, GetKeyName(branch->m_iKeyName),
                      gidNode ? std::to_string(gidNode->m_ullValue) : "N/A",
                      sizeNode ? std::to_string(sizeNode->m_ullValue) : "N/A");
+            LOG_MANIFEST_INFO("Patched depot {} manifest branch '{}': gid={} size={}", depotId, GetKeyName(branch->m_iKeyName),
+                     gidNode ? std::to_string(gidNode->m_ullValue) : "N/A",
+                     sizeNode ? std::to_string(sizeNode->m_ullValue) : "N/A");
         }
     }
 

@@ -32,7 +32,7 @@ endif()
 # For each known dependency, if a source dir is already cached at the shared
 # location, point FetchContent at it so populate becomes a no-op.
 set(_OST_ALL_CACHED TRUE)
-foreach(_dep IN ITEMS lua detours spdlog nanopb tomlplusplus)
+foreach(_dep IN ITEMS lua detours spdlog protobuf tomlplusplus)
     string(TOUPPER "${_dep}" _UPPER)
     set(_src "${OST_DEPS_DIR}/${_dep}-src")
     if(IS_DIRECTORY "${_src}")

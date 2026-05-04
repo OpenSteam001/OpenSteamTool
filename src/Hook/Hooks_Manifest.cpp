@@ -6,20 +6,79 @@
 
 // ═══════════════════════════════════════════════════════════════════
 //  Manifest request-code resolution.
-//  No cache — codes rotate over time, fetch every call.
+//  Codes rotate over time — cannot be cached.
+//
+//  For games with many DLCs (150+), Steam calls GetManifestRequestCode
+//  serially for every depot.  We keep a persistent WinHTTP session +
+//  connection so that repeated requests to the same manifest provider
+//  skip DNS / TCP / TLS setup after the first call.
 // ═══════════════════════════════════════════════════════════════════
 namespace {
+
+    // ── persistent connection state ───────────────────────────────
+    HINTERNET g_hSession = nullptr;
+    HINTERNET g_hConnect = nullptr;
+    bool      g_tls      = false;
+
+    void EnsureConnection(const wchar_t* host, INTERNET_PORT port, bool tls) {
+        // Already connected to the right host — reuse
+        if (g_hSession && g_hConnect)
+            return;
+
+        // Clean up stale handles
+        if (g_hConnect) { WinHttpCloseHandle(g_hConnect); g_hConnect = nullptr; }
+        if (g_hSession) { WinHttpCloseHandle(g_hSession); g_hSession = nullptr; }
+
+        g_tls = tls;
+        g_hSession = WinHttpOpen(L"OpenSteamTool/1.0",
+            WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!g_hSession) return;
+
+        WinHttpSetTimeouts(g_hSession,
+            Config::manifestTimeoutResolve,
+            Config::manifestTimeoutConnect,
+            Config::manifestTimeoutSend,
+            Config::manifestTimeoutRecv);
+
+        g_hConnect = WinHttpConnect(g_hSession, host, port, 0);
+        if (!g_hConnect) {
+            WinHttpCloseHandle(g_hSession);
+            g_hSession = nullptr;
+        }
+    }
+
+    void CloseConnection() {
+        if (g_hConnect) { WinHttpCloseHandle(g_hConnect); g_hConnect = nullptr; }
+        if (g_hSession) { WinHttpCloseHandle(g_hSession); g_hSession = nullptr; }
+    }
+
+    // Try ExecuteEx on the persistent connection; on failure reset
+    // the connection so the next call reconnects.
+    WinHttp::Result DoGet(const wchar_t* path, const char* urlForLog) {
+        auto r = WinHttp::ExecuteEx(g_hSession, g_hConnect, g_tls,
+                                    L"GET", path, nullptr, 0, nullptr,
+                                    urlForLog);
+        if (!r.ok)
+            CloseConnection();
+        return r;
+    }
+
+    // ── HTTP providers ────────────────────────────────────────────
+
     // GET https://manifest.steam.run/api/manifest/{gid}
     // Response: {"content":"1666836470726104466"}
     bool FetchSteamRun(uint64 manifest_gid, uint64* outRequestCode) {
-        char url[128];
-        snprintf(url, sizeof(url), "https://manifest.steam.run/api/manifest/%llu", manifest_gid);
+        EnsureConnection(L"manifest.steam.run", INTERNET_DEFAULT_HTTPS_PORT, true);
+        if (!g_hConnect) return false;
 
-        auto r = WinHttp::Execute(L"GET", url, nullptr, 0, nullptr,
-                                 Config::manifestTimeoutResolve,
-                                 Config::manifestTimeoutConnect,
-                                 Config::manifestTimeoutSend,
-                                 Config::manifestTimeoutRecv);
+        wchar_t path[80];
+        swprintf_s(path, L"/api/manifest/%llu", manifest_gid);
+
+        char urlForLog[128];
+        snprintf(urlForLog, sizeof(urlForLog), "https://manifest.steam.run/api/manifest/%llu", manifest_gid);
+
+        auto r = DoGet(path, urlForLog);
         LOG_MANIFEST_INFO("Manifest steamrun status={} gid={}", r.status, manifest_gid);
 
         if (!r.ok || r.status != 200) return false;
@@ -44,16 +103,18 @@ namespace {
     // GET http://gmrc.wudrm.com/manifest/{gid}
     // Response: plain-text uint64, e.g. "10570517747114638659"
     bool FetchWudrm(uint64 manifest_gid, uint64* outRequestCode) {
-        char url[128];
-        snprintf(url, sizeof(url), "http://gmrc.wudrm.com/manifest/%llu", manifest_gid);
+        EnsureConnection(L"gmrc.wudrm.com", INTERNET_DEFAULT_HTTP_PORT, false);
+        if (!g_hConnect) return false;
 
-        auto r = WinHttp::Execute(L"GET", url, nullptr, 0, nullptr,
-                                 Config::manifestTimeoutResolve,
-                                 Config::manifestTimeoutConnect,
-                                 Config::manifestTimeoutSend,
-                                 Config::manifestTimeoutRecv);
+        wchar_t path[80];
+        swprintf_s(path, L"/manifest/%llu", manifest_gid);
+
+        char urlForLog[128];
+        snprintf(urlForLog, sizeof(urlForLog), "http://gmrc.wudrm.com/manifest/%llu", manifest_gid);
+
+        auto r = DoGet(path, urlForLog);
         LOG_MANIFEST_INFO("Manifest wudrm status={} gid={}", r.status, manifest_gid);
-            
+
         if (!r.ok || r.status != 200) return false;
 
         uint64 code = 0;
@@ -106,5 +167,6 @@ namespace Hooks_Manifest {
         UNHOOK_BEGIN();
         UNINSTALL_HOOK(GetManifestRequestCode);
         UNHOOK_END();
+        CloseConnection();
     }
 }

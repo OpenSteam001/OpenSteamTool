@@ -30,7 +30,8 @@
 #define RecvMultiPktSig            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B F2 48 8B F9 48 8B CE"
 #define IPCProcessMessageSig       "48 89 5C 24 ?? 48 89 6C 24 ?? 56 41 54 41 55 41 56 41 57 48 83 EC ?? 49 8B D9"
 #define GetPipeClientSig           "85 D2 74 ?? 44 0F B7 CA"
-
+#define BBuildAndAsyncSendFrameSig "48 8B C4 55 48 8D 68 A1 48 81 EC C0 00 00 00"
+#define PchMsgNameFromEMsgSig      "48 89 5C 24 08 57 48 83 EC 20 8B D9 E8"
 
 /* -------------------------------------------------------------------------- */
 /*                     KeyValues — multi-signature arrays                      */
