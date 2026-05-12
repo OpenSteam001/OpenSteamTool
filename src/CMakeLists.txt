@@ -140,5 +140,6 @@ add_library(dwmapi SHARED
 # ---------------------------------------------------------------------------
 add_library(xinput1_4 SHARED
     xinput4_1/xinput1_4.cpp
+    xinput4_1/xinput1_4.def
 )
 target_link_libraries(xinput1_4 PRIVATE detours)
