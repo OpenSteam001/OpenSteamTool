@@ -1,0 +1,15 @@
+LIBRARY "xinput1_4"
+EXPORTS
+    XInputEnable @5
+    XInputGetAudioDeviceIds @10
+    XInputGetBatteryInformation @7
+    XInputGetCapabilities @4
+    XInputGetKeystroke @8
+    XInputGetState @2
+    XInputSetState @3
+    XInputOrdinal100 @100 NONAME
+    XInputOrdinal101 @101 NONAME
+    XInputOrdinal102 @102 NONAME
+    XInputOrdinal103 @103 NONAME
+    XInputOrdinal104 @104 NONAME
+    XInputOrdinal108 @108 NONAME
