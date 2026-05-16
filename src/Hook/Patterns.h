@@ -37,6 +37,7 @@
 #define MarkLicenseAsChangedSig    "89 54 24 ?? 53 55 56 57 41 56 48 83 EC"
 #define GetPackageInfoSig          "48 89 6C 24 ?? 41 56 48 83 EC ?? 8B 41 ?? 49 8B E8"
 #define ProcessPendingLicenseUpdatesSig "4C 8B DC 49 89 4B 08 41 55 41 57 48 83 EC 48 4C 8B E9"
+#define SetAppIdForCurrentPipeSig  "4C 8B DC 53 56 57 41 55 41 57 48 83 EC 70"
 
 /* -------------------------------------------------------------------------- */
 /*                     KeyValues — multi-signature arrays                      */

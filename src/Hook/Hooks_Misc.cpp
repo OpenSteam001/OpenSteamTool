@@ -12,6 +12,7 @@ namespace {
     using GetPackageInfo_t               = PackageInfo*(*)(void*, uint32, int64);
     using MarkLicenseAsChanged_t         = int64(*)(void*, uint32, bool);
     using ProcessPendingLicenseUpdates_t = bool(*)(void*);
+    using SetAppIdForCurrentPipe_t       = uint32_t(__fastcall*)(void*, uint32_t, bool);
 
     // ── X-macro lists ────────────────────────────────────────────────────────
     // One-shot int3: on hit, ctx->Rcx stored to the named output variable.
@@ -39,6 +40,8 @@ namespace {
     AppId_t   g_OnlineFixRealAppId;
 
     std::unordered_map<AppId_t, std::string> g_GameNameCache;
+
+    static SetAppIdForCurrentPipe_t oSetAppIdForCurrentPipe = nullptr;
 
     static std::vector<CaptureEntry> g_captures;
 
@@ -96,7 +99,17 @@ namespace {
 
         return EXCEPTION_CONTINUE_SEARCH;
     }
-}
+
+    // ── SetAppIdForCurrentPipe hook ────────────────────────────
+    uint32_t __fastcall hkSetAppIdForCurrentPipe(void* pSelf, uint32_t appId, bool bUnknown) {
+        if (appId != 0 && appId != kOnlineFixAppId && LuaConfig::HasDepot(appId)) {
+            LOG_MISC_INFO("SetAppIdForCurrentPipe: {} -> {}", appId, kOnlineFixAppId);
+            appId = kOnlineFixAppId;
+        }
+        return oSetAppIdForCurrentPipe(pSelf, appId, bUnknown);
+    }
+
+} // anonymous namespace
 
 namespace Hooks_Misc {
     void Install() {
@@ -112,6 +125,17 @@ namespace Hooks_Misc {
 
         if (!g_captures.empty() || g_spawnProcessTarget)
             g_vehHandle = AddVectoredExceptionHandler(1, VehHandler);
+
+        // SetAppIdForCurrentPipe hook
+        if (auto* p = FIND_SIG(diversion_hMdoule, SetAppIdForCurrentPipe)) {
+            oSetAppIdForCurrentPipe = reinterpret_cast<SetAppIdForCurrentPipe_t>(p);
+            DetourTransactionBegin();
+            DetourUpdateThread(GetCurrentThread());
+            DetourAttach(reinterpret_cast<PVOID*>(&oSetAppIdForCurrentPipe),
+                         reinterpret_cast<PVOID>(hkSetAppIdForCurrentPipe));
+            DetourTransactionCommit();
+            LOG_MISC_INFO("SetAppIdForCurrentPipe hook installed at {}", (void*)p);
+        }
     }
 
     void Uninstall() {
@@ -129,6 +153,15 @@ namespace Hooks_Misc {
         LOCATE_LIST(VEH_ZERO_RESOLVE)
         g_OnlineFixRealAppId = 0;
         g_GameNameCache.clear();
+
+        if (oSetAppIdForCurrentPipe) {
+            DetourTransactionBegin();
+            DetourUpdateThread(GetCurrentThread());
+            DetourDetach(reinterpret_cast<PVOID*>(&oSetAppIdForCurrentPipe),
+                         reinterpret_cast<PVOID>(hkSetAppIdForCurrentPipe));
+            DetourTransactionCommit();
+            oSetAppIdForCurrentPipe = nullptr;
+        }
     }
 
     AppId_t GetAppIDForCurrentPipe() {

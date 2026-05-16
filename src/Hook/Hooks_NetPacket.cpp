@@ -626,6 +626,75 @@ namespace Hooks_NetPacket_OnlineFix {
 
 
 // ════════════════════════════════════════════════════════════════
+//  Hooks_NetPacket_MMS
+//
+//  outgoing MMS lobby messages (6601-6621, odd = request)
+//
+//  rewrite app_id (field 1, varint) to 480 for all lua-added
+//  games so lobbies use the Spacewar session. uses
+//  protobuf wire-format manipulation to avoid adding proto defs
+//  for every MMS message type.
+// ════════════════════════════════════════════════════════════════
+namespace Hooks_NetPacket_MMS {
+
+    // scan for field-1 varint tag (0x08) and replace the value with 480.
+    // returns true and populates g_SendNewBody / g_cbSendNewBody if modified.
+    static bool RewriteAppIdTo480(const uint8* pBody, uint32 cbBody, const char* tag)
+    {
+        if (!pBody || cbBody < 2) return false;
+        if (pBody[0] != 0x08) return false;
+
+        uint32 appId = 0;
+        uint32 shift = 0;
+        uint32 varintEnd = 1;
+        for (; varintEnd < cbBody && varintEnd < 10; ++varintEnd) {
+            uint8 b = pBody[varintEnd];
+            appId |= static_cast<uint32>(b & 0x7F) << shift;
+            shift += 7;
+            if (!(b & 0x80)) {
+                ++varintEnd;
+                break;
+            }
+        }
+        if (varintEnd >= cbBody) return false;
+
+        // actual Spacewar or not lua game
+        if (appId == kOnlineFixAppId) return false;
+        if (!LuaConfig::HasDepot(appId)) return false;
+
+        LOG_ONLINEFIX_INFO("MMS {}: rewriting app_id {} -> 480", tag, appId);
+
+        // rebuild: tag (0x08) + 480 as varint (0xE0, 0x03) + remaining fields
+        uint32 newSize = 1 + 2 + (cbBody - varintEnd);
+        if (newSize > kMaxBodySize) return false;
+
+        g_SendNewBody[0] = 0x08;
+        g_SendNewBody[1] = 0xE0;
+        g_SendNewBody[2] = 0x03;
+        memcpy(g_SendNewBody + 3, pBody + varintEnd, cbBody - varintEnd);
+        g_cbSendNewBody = newSize;
+        return true;
+    }
+
+    bool HandleSend(EMsg eMsg, const uint8* pBody, uint32 cbBody)
+    {
+        static constexpr const char* kMmsNames[] = {
+            "CreateLobby", "?", "JoinLobby", "?", "LeaveLobby", "?",
+            "GetLobbyList", "?", "SetLobbyData", "?", "?", "?",
+            "SendLobbyChatMsg", "?", "SetLobbyOwner", "?",
+            "SetLobbyGameServer", "?", "?", "?", "InviteToLobby"
+        };
+        int idx = static_cast<int>(eMsg) - 6601;
+        if (idx >= 0 && idx < 21 && (idx % 2 == 0)) {
+            return RewriteAppIdTo480(pBody, cbBody, kMmsNames[idx]);
+        }
+        return false;
+    }
+
+} // namespace Hooks_NetPacket_MMS
+
+
+// ════════════════════════════════════════════════════════════════
 //  Dispatch
 // ════════════════════════════════════════════════════════════════
 namespace {
@@ -680,6 +749,11 @@ namespace {
             return;
 
         default:
+            // MMS lobby messages (6601-6621, odd = request)
+            if (eMsg >= k_EMsgClientMMSCreateLobby && eMsg <= k_EMsgClientMMSInviteToLobby
+                && (static_cast<uint32>(eMsg) & 1)) {
+                g_NeedReplaceSend = Hooks_NetPacket_MMS::HandleSend(eMsg, pBody, cbBody);
+            }
             return;
         }
     }
