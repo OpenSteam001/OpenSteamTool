@@ -215,13 +215,13 @@ namespace Hooks_Manifest {
             LOG_MANIFEST_WARN("Manifest gid={} lua returned nil, falling back to config", manifestGid);
         }
 
-        switch (Config::manifestUrl) {
-        case Config::ManifestUrl::Wudrm:
-            return FetchWudrm(manifestGid, outRequestCode);
-        case Config::ManifestUrl::SteamRun:
-        default:
-            return FetchSteamRun(manifestGid, outRequestCode);
+        if (Config::manifestUrl == Config::ManifestUrl::SteamRun) {
+            if (FetchSteamRun(manifestGid, outRequestCode))
+                return true;
+            LOG_MANIFEST_INFO("SteamRun failed for gid={}, falling back to GMRC", manifestGid);
+            CloseConnection();
         }
+        return FetchWudrm(manifestGid, outRequestCode);
     }
 
     // ═══════════════════════════════════════════════════════════════
