@@ -5,7 +5,7 @@
 // Catch-all for the lightweight info-capture int3 traps that don't fit a
 // dedicated category — currently:
 //   * GetAppIDForCurrentPipe  -> captures the SteamEngine pointer
-//   * SpawnProcess            -> OnlineFix detection + 480 rewrite
+//   * SpawnProcess            -> auto-spoof lua-added games to 480
 //   * GetAppDataFromAppInfo   -> captures the CAppInfoCache pointer
 //   * MarkLicenseAsChanged    -> captures pCUser; resolved for NotifyLicenseChanged
 //   * GetPackageInfo          -> captures pCPackageInfo; used by NotifyLicenseChanged to append AppIds
@@ -23,7 +23,7 @@ namespace Hooks_Misc {
     // Uses CUtlBuffer::EnsureCapacity from steamclient, resolved on first call.
     void EnsureBufferSize(CUtlBuffer* pWrite, int32 size);
 
-    // Resolve the real appid: if OnlineFix is active return real appid,
+    // Resolve the real appid: if SpawnProcess rewrote to 480 return real appid,
     // otherwise fall back to GetAppIDForCurrentPipe().
     AppId_t ResolveAppId();
 

@@ -30,7 +30,7 @@ inline char DiversionPath[MAX_PATH] = {};
 inline char LuaDir[MAX_PATH] = {};
 inline char ConfigPath[MAX_PATH] = {};
 
-// The fake AppId used by -onlinefix (SpaceWar).
+// The fake AppId used (SpaceWar).
 constexpr AppId_t kOnlineFixAppId = 480;
 
 #endif // DLLMAIN_H

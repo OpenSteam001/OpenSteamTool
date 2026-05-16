@@ -223,7 +223,7 @@ namespace Hooks_NetPacket_UserStats {
         }
 
         LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats request: original body:\n{}", req.DebugString());
-        
+
         AppId_t appId = req.appid();
         bool hasShaSchema = req.has_sha_schema() && !req.sha_schema().empty();
 
@@ -420,7 +420,7 @@ namespace Hooks_NetPacket_ETicket {
             LOG_NETPACKET_WARN("ClientRequestEncryptedAppTicketResponse: failed to SerializeToArray modified response");
             return;
         }
-        
+
         LOG_NETPACKET_DEBUG("ClientRequestEncryptedAppTicketResponse: modified body:\n{}", resp.DebugString());
 
         g_cbNewBody = static_cast<uint32>(encSize);
@@ -568,7 +568,7 @@ namespace Hooks_NetPacket_Manifest {
 //
 //  Outgoing: CMsgClientGamesPlayed (eMsg 742 / 5410)
 //
-//  When a game launched with -onlinefix reports appid 480, replace
+//  When a lua-added game reports appid 480, replace
 //  game_extra_info with the real game's localized name so friends
 //  see the correct title.
 // ════════════════════════════════════════════════════════════════
@@ -590,16 +590,18 @@ namespace Hooks_NetPacket_OnlineFix {
 
             // SpawnProcess rewrites pGameID to 480, so game_id is already 480.
             // Fill game_extra_info with the real game name.
+            AppId_t lookupAppId = appid;
             if (appid == kOnlineFixAppId) {
                 AppId_t realAppId = Hooks_Misc::ResolveAppId();
-                if (realAppId && LuaConfig::HasDepot(realAppId)) {
-                    std::string name = Hooks_Misc::GetGameNameByAppID(realAppId);
-                    if (!name.empty()) {
-                        game->set_game_extra_info(name);
-                        patched = true;
-                        LOG_ONLINEFIX_INFO("OnlineFix: 480 -> name '{}' (real appid {})",
-                            name, realAppId);
-                    }
+                if (realAppId) lookupAppId = realAppId;
+            }
+
+            if (LuaConfig::HasDepot(lookupAppId)) {
+                std::string name = Hooks_Misc::GetGameNameByAppID(lookupAppId);
+                if (!name.empty()) {
+                    game->set_game_extra_info(name);
+                    patched = true;
+                    LOG_ONLINEFIX_INFO("OnlineFix: appid {} -> name '{}'", lookupAppId, name);
                 }
             }
         }

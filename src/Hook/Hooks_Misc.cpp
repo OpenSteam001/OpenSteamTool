@@ -34,8 +34,8 @@ namespace {
     uint8_t*  g_spawnProcessTarget;
     PVOID     g_vehHandle;
 
-    // Assumes one game at a time.  Set by SpawnProcess VEH when -onlinefix
-    // is detected; cleared when a non-onlinefix game launches.
+    // Assumes one game at a time.  Set by SpawnProcess VEH when a
+    // lua-added game is launched; cleared on non-lua games.
     AppId_t   g_OnlineFixRealAppId;
 
     std::unordered_map<AppId_t, std::string> g_GameNameCache;
@@ -74,8 +74,7 @@ namespace {
 
                 const char* cmdLine = reinterpret_cast<const char*>(ctx->R8);
 
-                if (LuaConfig::HasDepot(appId) && cmdLine
-                    && strstr(cmdLine, "-onlinefix")) {
+                if (LuaConfig::HasDepot(appId)) {
                     g_OnlineFixRealAppId = appId;
                     *pGameID = kOnlineFixAppId;
                     LOG_MISC_INFO("SpawnProcess: appid {} -> {}, cmd=\"{}\"",
