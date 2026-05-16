@@ -224,7 +224,16 @@ namespace Hooks_NetPacket_UserStats {
 
         LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats request: original body:\n{}", req.DebugString());
 
-        AppId_t appId = req.appid();
+        AppId_t appId = static_cast<AppId_t>(req.appid());
+        if (appId == kOnlineFixAppId) {
+            AppId_t realAppId = Hooks_Misc::ResolveAppId();
+            if (realAppId && LuaConfig::HasDepot(realAppId)) {
+                LOG_ACHIEVEMENT_INFO("Player::GetUserStats request: appid 480 -> {}", realAppId);
+                req.set_appid(realAppId);
+                appId = realAppId;
+            }
+        }
+
         bool hasShaSchema = req.has_sha_schema() && !req.sha_schema().empty();
 
         if (hasShaSchema) {
@@ -258,11 +267,10 @@ namespace Hooks_NetPacket_UserStats {
     }
 
     // ── Recv: CPlayer_GetUserStats_Response (eMsg 147) ─────────
-    //     Header: set eresult=OK.  Body: strip stats (field 4).
+    //     rewrite header eresult=OK.  body passes through unchanged
     void HandleRecv_GetUserStatsResponse(const uint8* pHdr, uint32 cbHdr,
                                     const uint8* pBody, uint32 cbBody)
     {
-        // Header: set eresult=OK
         CMsgProtoBufHeader hdrMsg;
         if (!hdrMsg.ParseFromArray(pHdr, cbHdr)){
             LOG_ACHIEVEMENT_WARN("Player::GetUserStats response: failed to ParseFromArray original header");
@@ -270,49 +278,12 @@ namespace Hooks_NetPacket_UserStats {
         }
         LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats response: original header:\n{}", hdrMsg.DebugString());
 
-        // Look up appid via jobid_target -> jobid_source match
-        AppId_t appId = 0;
-        bool hasAppId = false;
-        if (hdrMsg.has_jobid_target()) {
-            uint64 jobId = hdrMsg.jobid_target();
-            auto it = g_JobIdToAppId.find(jobId);
-            if (it != g_JobIdToAppId.end()) {
-                appId = it->second;
-                hasAppId = true;
-                LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats response: matched jobid={} -> appid={}", jobId, appId);
-                g_JobIdToAppId.erase(it);
-            }
-        }
-
         hdrMsg.set_eresult(static_cast<int32_t>(k_EResultOK));
         g_cbNewHdr = static_cast<uint32>(hdrMsg.ByteSizeLong());
         if (g_cbNewHdr > kMaxHdrSize || !hdrMsg.SerializeToArray(g_NewHdr, kMaxHdrSize))
             return;
         LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats response: modified header:\n{}", hdrMsg.DebugString());
         g_NeedReplaceHdr = true;
-
-        // Body: strip stats (only if appid was matched and is in our config)
-        CPlayer_GetUserStats_Response resp;
-        if (!resp.ParseFromArray(pBody, cbBody)){
-            LOG_ACHIEVEMENT_WARN("Player::GetUserStats response: failed to ParseFromArray original response");
-            return;
-        }
-        LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats response: original body:\n{}", resp.DebugString());
-
-        if (!hasAppId || !LuaConfig::HasDepot(appId)) {
-            LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats response: no appid match, skip body strip");
-            return;
-        }
-
-        resp.clear_stats();
-        g_NewBodySize = static_cast<uint32>(resp.ByteSizeLong());
-        if (!resp.SerializeToArray(const_cast<uint8*>(pBody), cbBody)){
-            LOG_ACHIEVEMENT_WARN("Player::GetUserStats response: failed to SerializeToArray modified response");
-            return;
-        }
-        g_ResizedInPlace = true;
-
-        LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats response: modified body:\n{}", resp.DebugString());
     }
 
     // ── Send: CMsgClientGetUserStats (eMsg 818) ────────────────
@@ -330,6 +301,14 @@ namespace Hooks_NetPacket_UserStats {
             return false;
         }
         AppId_t appId = static_cast<AppId_t>(req.game_id());
+        if (appId == kOnlineFixAppId) {
+            AppId_t realAppId = Hooks_Misc::ResolveAppId();
+            if (realAppId && LuaConfig::HasDepot(realAppId)) {
+                LOG_ACHIEVEMENT_INFO("ClientGetUserStats request: game_id 480 -> {}", realAppId);
+                req.set_game_id(realAppId);
+                appId = realAppId;
+            }
+        }
         if (!LuaConfig::HasDepot(appId)) {
             LOG_ACHIEVEMENT_WARN("ClientGetUserStats request: appid={} is not in addappid", appId);
             return false;
@@ -353,7 +332,7 @@ namespace Hooks_NetPacket_UserStats {
     }
 
     // ── Recv: CMsgClientGetUserStatsResponse (eMsg 819) ────────
-    //     Strip stats(5) + achievement_blocks(6), patch eresult->OK.
+    //     only patch eresult->OK.  stats/achievements pass through unchanged
     bool HandleRecv_ClientGetUserStatsResponse(const uint8* pBody, uint32 cbBody)
     {
         CMsgClientGetUserStatsResponse resp;
@@ -364,10 +343,8 @@ namespace Hooks_NetPacket_UserStats {
             LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats response: no modification needed");
             return false;
         }
-        resp.clear_stats();
-        resp.clear_achievement_blocks();
         resp.set_eresult(1);  // k_EResultOK
-        LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats response: clear stats and achievement_blocks, set eresult=OK");
+        LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats response: set eresult=OK");
 
         g_NewBodySize = static_cast<uint32>(resp.ByteSizeLong());
         if (!resp.SerializeToArray(const_cast<uint8*>(pBody), cbBody))

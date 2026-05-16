@@ -82,9 +82,8 @@ namespace {
 
                 if (LuaConfig::HasDepot(appId)) {
                     g_OnlineFixRealAppId = appId;
-                    *pGameID = kOnlineFixAppId;
-                    LOG_MISC_INFO("SpawnProcess: appid {} -> {}, cmd=\"{}\"",
-                                  appId, kOnlineFixAppId, cmdLine);
+                    LOG_MISC_INFO("SpawnProcess: captured real appid {} (cmd=\"{}\")",
+                                  appId, cmdLine);
                 } else {
                     g_OnlineFixRealAppId = 0;
                 }
