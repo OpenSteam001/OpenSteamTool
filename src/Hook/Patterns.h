@@ -38,6 +38,7 @@
 #define GetPackageInfoSig          "48 89 6C 24 ?? 41 56 48 83 EC ?? 8B 41 ?? 49 8B E8"
 #define ProcessPendingLicenseUpdatesSig "4C 8B DC 49 89 4B 08 41 55 41 57 48 83 EC 48 4C 8B E9"
 #define SetAppIdForCurrentPipeSig  "4C 8B DC 53 56 57 41 55 41 57 48 83 EC 70"
+#define BCanRemotePlayTogetherSig  "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B ?? ?? ?? ?? ?? 48 8B F1 8B FA"
 
 /* -------------------------------------------------------------------------- */
 /*                     KeyValues — multi-signature arrays                      */

@@ -43,6 +43,9 @@ namespace {
 
     static SetAppIdForCurrentPipe_t oSetAppIdForCurrentPipe = nullptr;
 
+    static void*    g_bCanRemotePlayTogetherTarget = nullptr;
+    static uint8_t  g_bCanRemotePlayTogetherOrig[5];
+
     static std::vector<CaptureEntry> g_captures;
 
     // ── VEH handler ──────────────────────────────────────────────────────────
@@ -136,6 +139,15 @@ namespace Hooks_Misc {
             DetourTransactionCommit();
             LOG_MISC_INFO("SetAppIdForCurrentPipe hook installed at {}", (void*)p);
         }
+
+        // BCanRemotePlayTogether patch — hides the "Invite Anyone to Play" banner
+        if (auto* p = FIND_SIG(diversion_hMdoule, BCanRemotePlayTogether)) {
+            g_bCanRemotePlayTogetherTarget = p;
+            memcpy(g_bCanRemotePlayTogetherOrig, p, 5);
+            static constexpr uint8_t kPatch[5] = { 0xB0, 0x00, 0xC3, 0x90, 0x90 };
+            PatchMemoryBytes(p, kPatch, 5);
+            LOG_MISC_INFO("BCanRemotePlayTogether patched at {}", p);
+        }
     }
 
     void Uninstall() {
@@ -161,6 +173,11 @@ namespace Hooks_Misc {
                          reinterpret_cast<PVOID>(hkSetAppIdForCurrentPipe));
             DetourTransactionCommit();
             oSetAppIdForCurrentPipe = nullptr;
+        }
+
+        if (g_bCanRemotePlayTogetherTarget) {
+            PatchMemoryBytes(g_bCanRemotePlayTogetherTarget, g_bCanRemotePlayTogetherOrig, 5);
+            g_bCanRemotePlayTogetherTarget = nullptr;
         }
     }
 
