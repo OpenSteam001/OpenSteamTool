@@ -39,6 +39,11 @@ namespace {
     // lua-added game is launched; cleared on non-lua games.
     AppId_t   g_OnlineFixRealAppId;
 
+    // Thread ID of the Steam client thread that handles the game's pipe.
+    // Only rewrite SetAppIdForCurrentPipe on this thread to avoid
+    // affecting SAM (which connects on a different thread).
+    DWORD     g_gamePipeThreadId = 0;
+
     std::unordered_map<AppId_t, std::string> g_GameNameCache;
 
     static SetAppIdForCurrentPipe_t oSetAppIdForCurrentPipe = nullptr;
@@ -85,7 +90,9 @@ namespace {
                     LOG_MISC_INFO("SpawnProcess: captured real appid {} (cmd=\"{}\")",
                                   appId, cmdLine);
                 } else {
-                    g_OnlineFixRealAppId = 0;
+        g_OnlineFixRealAppId = 0;
+        g_gamePipeThreadId = 0;
+                    g_gamePipeThreadId = 0;
                 }
                 return EXCEPTION_CONTINUE_EXECUTION;
             }
@@ -104,9 +111,35 @@ namespace {
 
     // ── SetAppIdForCurrentPipe hook ────────────────────────────
     uint32_t __fastcall hkSetAppIdForCurrentPipe(void* pSelf, uint32_t appId, bool bUnknown) {
-        if (appId != 0 && appId != kOnlineFixAppId && LuaConfig::HasDepot(appId)) {
-            LOG_MISC_INFO("SetAppIdForCurrentPipe: {} -> {}", appId, kOnlineFixAppId);
-            appId = kOnlineFixAppId;
+        if (appId != 0 && appId != kOnlineFixAppId && appId == g_OnlineFixRealAppId && LuaConfig::HasDepot(appId)) {
+            // Check caller module — skip if called from steamui.dll (overlay/UI)
+            void* retAddr = _ReturnAddress();
+            HMODULE hMod = nullptr;
+            bool fromUI = false;
+            if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   (LPCSTR)retAddr, &hMod)) {
+                char path[MAX_PATH];
+                GetModuleFileNameA(hMod, path, MAX_PATH);
+                std::string modName = path;
+                size_t lastSlash = modName.find_last_of("\\/");
+                if (lastSlash != std::string::npos) modName = modName.substr(lastSlash + 1);
+                for (auto& c : modName) c = (char)tolower((unsigned char)c);
+                fromUI = (modName == "steamui.dll");
+            }
+            if (!fromUI) {
+                // First matching call on any thread → record and rewrite.
+                // Subsequent calls on the SAME thread are also rewritten.
+                // Different threads (e.g. SAM's pipe) are left untouched.
+                DWORD currentTid = GetCurrentThreadId();
+                if (g_gamePipeThreadId == 0) {
+                    g_gamePipeThreadId = currentTid;
+                }
+                if (currentTid == g_gamePipeThreadId) {
+                    LOG_MISC_INFO("SetAppIdForCurrentPipe: {} -> {} (pipe={}, tid={})",
+                                  appId, kOnlineFixAppId, (void*)pSelf, currentTid);
+                    appId = kOnlineFixAppId;
+                }
+            }
         }
         return oSetAppIdForCurrentPipe(pSelf, appId, bUnknown);
     }
@@ -197,6 +230,10 @@ namespace Hooks_Misc {
     AppId_t ResolveAppId() {
         if (g_OnlineFixRealAppId) return g_OnlineFixRealAppId;
         return GetAppIDForCurrentPipe();
+    }
+
+    AppId_t GetOnlineFixRealAppId() {
+        return g_OnlineFixRealAppId;
     }
 
     void EnsureBufferSize(CUtlBuffer* pWrite, int32 size)

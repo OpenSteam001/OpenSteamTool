@@ -27,6 +27,10 @@ namespace Hooks_Misc {
     // otherwise fall back to GetAppIDForCurrentPipe().
     AppId_t ResolveAppId();
 
+    // Returns the real AppId captured during SpawnProcess, or 0 if no game
+    // was launched via our VEH (e.g. SAM or other tools).
+    AppId_t GetOnlineFixRealAppId();
+
     // Get localized game name via GetAppDataFromAppInfo (cached).
     std::string GetGameNameByAppID(AppId_t appId);
 

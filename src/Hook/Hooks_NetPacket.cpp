@@ -225,25 +225,16 @@ namespace Hooks_NetPacket_UserStats {
         LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats request: original body:\n{}", req.DebugString());
 
         AppId_t appId = static_cast<AppId_t>(req.appid());
-        if (appId == kOnlineFixAppId) {
-            AppId_t realAppId = Hooks_Misc::ResolveAppId();
-            if (realAppId && LuaConfig::HasDepot(realAppId)) {
-                LOG_ACHIEVEMENT_INFO("Player::GetUserStats request: appid 480 -> {}", realAppId);
-                req.set_appid(realAppId);
-                appId = realAppId;
-            }
-        }
-
-        bool hasShaSchema = req.has_sha_schema() && !req.sha_schema().empty();
-
-        if (hasShaSchema) {
-            LOG_ACHIEVEMENT_WARN("Player::GetUserStats request: sha_schema is present, do not spoof");
+        if (appId != kOnlineFixAppId) {
             return false;
         }
-        if (!LuaConfig::HasDepot(appId)) {
-            LOG_ACHIEVEMENT_WARN("Player::GetUserStats request: appid={} is not in addappid", appId);
+        AppId_t realAppId = Hooks_Misc::GetOnlineFixRealAppId();
+        if (!realAppId || !LuaConfig::HasDepot(realAppId)) {
             return false;
         }
+        LOG_ACHIEVEMENT_INFO("Player::GetUserStats request: appid 480 -> {}", realAppId);
+        req.set_appid(realAppId);
+        appId = realAppId;
 
         // Save jobid_source -> appid for the response handler
         CMsgProtoBufHeader hdr;
@@ -254,7 +245,9 @@ namespace Hooks_NetPacket_UserStats {
         }
 
         uint64_t newSteamId = LuaConfig::GetStatSteamId(appId);
-        req.set_steamid(newSteamId);
+        if (newSteamId != 0) {
+            req.set_steamid(newSteamId);
+        }
 
         g_cbSendNewBody = static_cast<uint32>(req.ByteSizeLong());
         if (!req.SerializeToArray(g_SendNewBody, kMaxBodySize)) {
@@ -267,22 +260,20 @@ namespace Hooks_NetPacket_UserStats {
     }
 
     // ── Recv: CPlayer_GetUserStats_Response (eMsg 147) ─────────
-    //     rewrite header eresult=OK.  body passes through unchanged
+    //     Ensure eresult=OK in the header so the caller accepts the
+    //     response (the send handler rewrote appid to the real game).
     void HandleRecv_GetUserStatsResponse(const uint8* pHdr, uint32 cbHdr,
                                     const uint8* pBody, uint32 cbBody)
     {
-        CMsgProtoBufHeader hdrMsg;
-        if (!hdrMsg.ParseFromArray(pHdr, cbHdr)){
-            LOG_ACHIEVEMENT_WARN("Player::GetUserStats response: failed to ParseFromArray original header");
+        CMsgProtoBufHeader hdr;
+        if (!hdr.ParseFromArray(pHdr, cbHdr)) {
+            LOG_ACHIEVEMENT_WARN("Player::GetUserStats response: failed to parse header");
             return;
         }
-        LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats response: original header:\n{}", hdrMsg.DebugString());
-
-        hdrMsg.set_eresult(static_cast<int32_t>(k_EResultOK));
-        g_cbNewHdr = static_cast<uint32>(hdrMsg.ByteSizeLong());
-        if (g_cbNewHdr > kMaxHdrSize || !hdrMsg.SerializeToArray(g_NewHdr, kMaxHdrSize))
+        hdr.set_eresult(static_cast<int32_t>(k_EResultOK));
+        g_cbNewHdr = static_cast<uint32>(hdr.ByteSizeLong());
+        if (g_cbNewHdr > kMaxHdrSize || !hdr.SerializeToArray(g_NewHdr, kMaxHdrSize))
             return;
-        LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats response: modified header:\n{}", hdrMsg.DebugString());
         g_NeedReplaceHdr = true;
     }
 
@@ -301,25 +292,22 @@ namespace Hooks_NetPacket_UserStats {
             return false;
         }
         AppId_t appId = static_cast<AppId_t>(req.game_id());
-        if (appId == kOnlineFixAppId) {
-            AppId_t realAppId = Hooks_Misc::ResolveAppId();
-            if (realAppId && LuaConfig::HasDepot(realAppId)) {
-                LOG_ACHIEVEMENT_INFO("ClientGetUserStats request: game_id 480 -> {}", realAppId);
-                req.set_game_id(realAppId);
-                appId = realAppId;
-            }
-        }
-        if (!LuaConfig::HasDepot(appId)) {
-            LOG_ACHIEVEMENT_WARN("ClientGetUserStats request: appid={} is not in addappid", appId);
+        if (appId != kOnlineFixAppId) {
+            // Not our game's request — leave untouched
             return false;
         }
-        if (!req.has_schema_local_version() || req.schema_local_version() != -1) {
-            LOG_ACHIEVEMENT_WARN("ClientGetUserStats request: schema_local_version is not -1");
+        AppId_t realAppId = Hooks_Misc::GetOnlineFixRealAppId();
+        if (!realAppId || !LuaConfig::HasDepot(realAppId)) {
             return false;
         }
+        LOG_ACHIEVEMENT_INFO("ClientGetUserStats request: game_id 480 -> {}", realAppId);
+        req.set_game_id(realAppId);
+        appId = realAppId;
 
         uint64_t newSteamId = LuaConfig::GetStatSteamId(appId);
-        req.set_steam_id_for_user(newSteamId);
+        if (newSteamId != 0) {
+            req.set_steam_id_for_user(newSteamId);
+        }
 
         g_cbSendNewBody = static_cast<uint32>(req.ByteSizeLong());
         if (!req.SerializeToArray(g_SendNewBody, kMaxBodySize)) {
@@ -332,30 +320,134 @@ namespace Hooks_NetPacket_UserStats {
     }
 
     // ── Recv: CMsgClientGetUserStatsResponse (eMsg 819) ────────
-    //     only patch eresult->OK.  stats/achievements pass through unchanged
+    //     Rewrite game_id back to 480 and ensure eresult=OK so the
+    //     caller (on pipe 480) accepts the response.
     bool HandleRecv_ClientGetUserStatsResponse(const uint8* pBody, uint32 cbBody)
     {
         CMsgClientGetUserStatsResponse resp;
-        if (!resp.ParseFromArray(pBody, cbBody))
-            return false;
-        LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats response: original body:\n{}", resp.DebugString());
-        if(!resp.has_game_id() || !LuaConfig::HasDepot(static_cast<AppId_t>(resp.game_id()))) {
-            LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats response: no modification needed");
+        if (!resp.ParseFromArray(pBody, cbBody)) {
+            LOG_ACHIEVEMENT_WARN("ClientGetUserStats response: failed to ParseFromArray");
             return false;
         }
-        resp.set_eresult(1);  // k_EResultOK
-        LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats response: set eresult=OK");
+        LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats response: original body:\n{}", resp.DebugString());
 
-        g_NewBodySize = static_cast<uint32>(resp.ByteSizeLong());
-        if (!resp.SerializeToArray(const_cast<uint8*>(pBody), cbBody))
+        AppId_t respAppId = resp.has_game_id()
+            ? static_cast<AppId_t>(resp.game_id() & 0xFFFFFF)
+            : kOnlineFixAppId;
+
+        // Only rewrite for the game's pipe (AppId=480), not SAM's pipe.
+        // Check via GetAppIDForCurrentPipe which returns the current thread's
+        // pipe AppId.
+        AppId_t pipeAppId = Hooks_Misc::GetAppIDForCurrentPipe();
+        AppId_t onlineFixRealAppId = Hooks_Misc::GetOnlineFixRealAppId();
+        if (onlineFixRealAppId != 0
+            && pipeAppId == kOnlineFixAppId
+            && respAppId == onlineFixRealAppId
+            && respAppId != kOnlineFixAppId
+            && LuaConfig::HasDepot(respAppId)) {
+            LOG_ACHIEVEMENT_INFO("ClientGetUserStats response: game_id {} -> 480", respAppId);
+            resp.set_game_id(kOnlineFixAppId);
+        }
+
+        resp.set_eresult(k_EResultOK);
+
+        g_cbNewBody = static_cast<uint32>(resp.ByteSizeLong());
+        if (g_cbNewBody > kMaxBodySize || !resp.SerializeToArray(g_NewBody, kMaxBodySize))
             return false;
 
-        g_ResizedInPlace = true;
         LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats response: modified body:\n{}", resp.DebugString());
         return true;
     }
 
 } // namespace Hooks_NetPacket_UserStats
+
+
+// ════════════════════════════════════════════════════════════════
+//  Hooks_NetPacket_StoreStats
+//
+//  Outgoing: CMsgClientStoreUserStats (eMsg 820)
+//  Incoming: CMsgClientStoreUserStatsResponse (eMsg 821)
+//
+//  Rewrites game_id from 480 → realAppId so achievements are saved
+//  under the correct game on the backend.
+//
+//  Wire format (no compiled proto for this message):
+//    field  1: game_id           (fixed64, tag 0x09, 8 bytes)
+//    field  2: steam_id_for_user (fixed64, tag 0x11, 8 bytes)
+//    response field 2: eresult   (varint,  tag 0x10)
+// ════════════════════════════════════════════════════════════════
+namespace Hooks_NetPacket_StoreStats {
+
+    bool HandleSend(const uint8* pBody, uint32 cbBody)
+    {
+        // CMsgClientStoreUserStats:
+        //   field 1: game_id (fixed64, tag 0x09, 8 bytes LE)
+        //   field 2: steam_id_for_user (fixed64, tag 0x11, 8 bytes LE)
+        // We only rewrite field 1 (game_id 480 → realAppId).
+        // Only modify requests on the game's pipe (480)
+        if (!pBody || cbBody < 9 || pBody[0] != 0x09) return false;
+
+        uint64_t gameId = 0;
+        memcpy(&gameId, pBody + 1, 8);
+        AppId_t appId = static_cast<AppId_t>(gameId & 0xFFFFFF);
+
+        if (appId != kOnlineFixAppId) {
+            // Not our game's StoreStats — leave untouched
+            return false;
+        }
+
+        // game_id is 480 — rewrite to real AppId
+        AppId_t realAppId = Hooks_Misc::ResolveAppId();
+        if (!realAppId || !LuaConfig::HasDepot(realAppId)) return false;
+
+        // Always copy the original body first
+        memcpy(g_SendNewBody, pBody, cbBody);
+        uint64_t realGameId = realAppId;
+        memcpy(g_SendNewBody + 1, &realGameId, 8);
+
+        // Insert or rewrite steam_id_for_user so the backend saves
+        // the unlock to the correct account that owns the game.
+        uint64_t newSteamId = LuaConfig::GetStatSteamId(realAppId);
+        if (newSteamId) {
+            if (cbBody >= 18 && pBody[9] == 0x11) {
+                // steam_id_for_user already present — rewrite it
+                memcpy(g_SendNewBody + 10, &newSteamId, 8);
+                g_cbSendNewBody = cbBody;
+            } else {
+                // steam_id_for_user not present — append it
+                g_SendNewBody[cbBody] = 0x11;    // tag for field 2 (fixed64)
+                memcpy(g_SendNewBody + cbBody + 1, &newSteamId, 8);
+                g_cbSendNewBody = cbBody + 9;
+            }
+        } else {
+            g_cbSendNewBody = cbBody;
+        }
+        LOG_ONLINEFIX_INFO("StoreStats: game_id 480 -> {}", realAppId);
+        return true;
+    }
+
+    void HandleRecv(const uint8* pBody, uint32 cbBody)
+    {
+        // CMsgClientStoreUserStatsResponse wire format:
+        //   field 1: game_id (fixed64, tag 0x09, 8 bytes LE)
+        //   field 2: eresult  (varint,  tag 0x10)
+        // Keep game_id as-is (realAppId) so the overlay notification
+        // fires for the running game; just ensure eresult=OK.
+        if (!pBody || cbBody < 10 || pBody[0] != 0x09) return;
+
+        // Find eresult tag (0x10) and set to OK
+        for (uint32 i = 9; i < cbBody; ++i) {
+            if (pBody[i] == 0x10) {
+                memcpy(g_NewBody, pBody, cbBody);
+                g_NewBody[i + 1] = 1; // eresult = OK
+                g_cbNewBody = cbBody;
+                g_NeedReplaceBody = true;
+                break;
+            }
+        }
+    }
+
+} // namespace Hooks_NetPacket_StoreStats
 
 
 // ════════════════════════════════════════════════════════════════
@@ -725,6 +817,10 @@ namespace {
             g_NeedReplaceSend = Hooks_NetPacket_UserStats::HandleSend_ClientGetUserStats(pBody, cbBody);
             return;
 
+        case k_EMsgClientStoreUserStats:             // 820
+            g_NeedReplaceSend = Hooks_NetPacket_StoreStats::HandleSend(pBody, cbBody);
+            return;
+
         default:
             // MMS lobby messages (6601-6621, odd = request)
             if (eMsg >= k_EMsgClientMMSCreateLobby && eMsg <= k_EMsgClientMMSInviteToLobby
@@ -791,6 +887,10 @@ namespace {
         case k_EMsgClientGetUserStatsResponse:     // 819
             g_NeedReplaceBody = Hooks_NetPacket_UserStats::HandleRecv_ClientGetUserStatsResponse(
                 pBody, cbBody);
+            return;
+
+        case k_EMsgClientStoreUserStatsResponse:    // 821
+            Hooks_NetPacket_StoreStats::HandleRecv(pBody, cbBody);
             return;
 
         case k_EMsgClientSharedLibraryStopPlaying:     // 9406
