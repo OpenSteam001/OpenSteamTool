@@ -564,6 +564,289 @@ namespace Hooks_NetPacket_Manifest {
 
 
 // ════════════════════════════════════════════════════════════════
+//  Hooks_NetPacket_RichPresence
+//
+//  Outgoing: CMsgClientGamesPlayed   (eMsg 742 / 5410)
+//  Incoming: CMsgClientPersonaState  (eMsg 766)
+//
+//  The server drops friend-side broadcasts for unowned AppIds, so the
+//  banner stays on the last cached state.  Cache real self-pushes and
+//  re-deliver a patched copy through oRecvPkt by borrowing the next
+//  carrier packet's data pointer.
+// ════════════════════════════════════════════════════════════════
+namespace Hooks_NetPacket_RichPresence {
+
+    AppId_t g_PlayingAppId = 0;
+    uint64  g_LocalSteamId = 0;
+
+    // Most recent self-PersonaState bytes captured from a real server push.
+    // Reused as the template every game launch.
+    uint8   g_SelfHdr [kMaxHdrSize];
+    uint32  g_cbSelfHdr      = 0;
+    uint8   g_SelfBody[kMaxBodySize];
+    uint32  g_cbSelfBody     = 0;
+    bool    g_HaveSelfCached = false;
+
+    // Manufactured PersonaState packet (eMsg 766) ready to inject.
+    uint8   g_InjectPkt[kMaxPacketSize];
+    uint32  g_cbInjectPkt   = 0;
+    bool    g_InjectPending = false;
+
+    // Rich presence KVs per AppId, captured from outbound
+    // CMsgClientRichPresenceUpload.  Per-AppId so a multi-game stack
+    // does not conflate KV state.
+    std::unordered_map<AppId_t, std::vector<std::pair<std::string, std::string>>> g_RPKvsByAppId;
+
+    // Walk Steam's binary KV1 stream (a top-level "RP" struct around
+    // string KVs) and collect every string KV at any depth.  Type 0x00
+    // starts a struct, 0x01 a string KV, 0x08 ends a struct.  String KVs
+    // are null-terminated key + null-terminated value.
+    static void ExtractStringKVs(const uint8* data, uint32 size,
+                                 std::vector<std::pair<std::string, std::string>>& out)
+    {
+        uint32 pos = 0;
+        int depth = 0;
+        auto readCStr = [&](std::string& s) -> bool {
+            uint32 start = pos;
+            while (pos < size && data[pos] != 0) ++pos;
+            if (pos >= size) return false;
+            s.assign(reinterpret_cast<const char*>(data + start), pos - start);
+            ++pos;
+            return true;
+        };
+        while (pos < size) {
+            uint8 type = data[pos++];
+            if (type == 0x08) {
+                if (depth > 0) { --depth; continue; }
+                break;
+            }
+            if (type == 0x00) {
+                std::string name;
+                if (!readCStr(name)) return;
+                ++depth;
+            } else if (type == 0x01) {
+                std::string key, value;
+                if (!readCStr(key) || !readCStr(value)) return;
+                out.emplace_back(std::move(key), std::move(value));
+            } else {
+                return;
+            }
+        }
+    }
+
+    // Patch the self Friend entry with the appid (0 = stopped) and per-app
+    // KVs.  Mask status_flags's RichPresence bit (0x1000) on appid + empty
+    // KVs so a freshly launched game's first inject does not wipe the UI's
+    // m_mapRichPresence, which is rebuilt from rich_presence() whenever
+    // that bit is set.
+    static void ApplyGameFields(CMsgClientPersonaState& msg,
+                                CMsgClientPersonaState::Friend* entry,
+                                AppId_t appid)
+    {
+        // EClientPersonaStateFlag::k_EClientPersonaStateFlagRichPresence
+        constexpr uint32 kStatusFlagRichPresence = 0x1000;
+
+        if (appid) {
+            entry->set_game_played_app_id(appid);
+            entry->set_gameid(static_cast<uint64>(appid));
+            std::string name = Hooks_Misc::GetGameNameByAppID(appid);
+            if (!name.empty()) entry->set_game_name(name);
+            entry->clear_rich_presence();
+            auto it = g_RPKvsByAppId.find(appid);
+            const bool hasKvs = (it != g_RPKvsByAppId.end()) && !it->second.empty();
+            if (hasKvs) {
+                for (const auto& [k, v] : it->second) {
+                    auto* kv = entry->add_rich_presence();
+                    kv->set_key(k);
+                    kv->set_value(v);
+                }
+                msg.set_status_flags(msg.status_flags() | kStatusFlagRichPresence);
+            } else {
+                msg.set_status_flags(msg.status_flags() & ~kStatusFlagRichPresence);
+            }
+        } else {
+            entry->clear_game_played_app_id();
+            entry->clear_gameid();
+            entry->clear_game_name();
+            entry->clear_rich_presence();
+            msg.set_status_flags(msg.status_flags() | kStatusFlagRichPresence);
+        }
+    }
+
+    static bool BuildInject(AppId_t appid)
+    {
+        if (!g_HaveSelfCached) return false;
+
+        CMsgClientPersonaState msg;
+        if (!msg.ParseFromArray(g_SelfBody, g_cbSelfBody)) return false;
+
+        // Find our entry (a self-push always contains it).
+        CMsgClientPersonaState::Friend* entry = nullptr;
+        for (int i = 0; i < msg.friends_size(); ++i) {
+            auto* f = msg.mutable_friends(i);
+            if (f->has_friendid() && f->friendid() == g_LocalSteamId) {
+                entry = f;
+                break;
+            }
+        }
+        if (!entry) return false;
+
+        ApplyGameFields(msg, entry, appid);
+
+        uint32 hdrSize  = g_cbSelfHdr;
+        uint32 bodySize = static_cast<uint32>(msg.ByteSizeLong());
+        uint32 total    = sizeof(MsgHdr) + hdrSize + bodySize;
+        if (total > sizeof(g_InjectPkt) || bodySize > kMaxBodySize) {
+            LOG_RICHPRESENCE_WARN("Inject packet too large ({} bytes)", total);
+            return false;
+        }
+
+        auto* mhdr = reinterpret_cast<MsgHdr*>(g_InjectPkt);
+        mhdr->eMsg = static_cast<EMsg>(
+            static_cast<uint32>(k_EMsgClientPersonaState) | kMsgHdrProtoFlag);
+        mhdr->headerLength = hdrSize;
+        memcpy(g_InjectPkt + sizeof(MsgHdr), g_SelfHdr, hdrSize);
+        if (!msg.SerializeToArray(g_InjectPkt + sizeof(MsgHdr) + hdrSize, bodySize))
+            return false;
+
+        g_cbInjectPkt = total;
+        LOG_RICHPRESENCE_INFO("Built inject for appid {} ({} bytes)", appid, total);
+        return true;
+    }
+
+    // Decode outbound CMsgClientRichPresenceUpload into per-AppId KVs
+    // and stage a fresh PersonaState inject.
+    void TrackRPSend(const uint8* pBody, uint32 cbBody)
+    {
+        if (g_LocalSteamId == 0 || g_PlayingAppId == 0) return;
+
+        CMsgClientRichPresenceUpload up;
+        if (!up.ParseFromArray(pBody, cbBody)) return;
+        if (!up.has_rich_presence_kv()) return;
+
+        const std::string& kv = up.rich_presence_kv();
+        auto& kvs = g_RPKvsByAppId[g_PlayingAppId];
+        kvs.clear();
+        ExtractStringKVs(reinterpret_cast<const uint8*>(kv.data()),
+                         static_cast<uint32>(kv.size()), kvs);
+        LOG_RICHPRESENCE_DEBUG("RP upload appid={}: kv_bytes={} extracted={} pairs",
+            g_PlayingAppId, kv.size(), kvs.size());
+
+        if (BuildInject(g_PlayingAppId)) g_InjectPending = true;
+    }
+
+    void TrackSend(const CMsgClientGamesPlayed& msg, const uint8* pHdr, uint32 cbHdr)
+    {
+        if (g_LocalSteamId == 0) {
+            CMsgProtoBufHeader hdr;
+            if (hdr.ParseFromArray(pHdr, cbHdr) && hdr.has_steamid() && hdr.steamid()) {
+                g_LocalSteamId = hdr.steamid();
+                LOG_RICHPRESENCE_DEBUG("Captured local SteamID 0x{:X}", g_LocalSteamId);
+            }
+        }
+
+        // Steam stacks running games in games_played; the banner follows
+        // the tail (most recently launched).  Mirror that — only the
+        // tail's appid drives our inject.
+        AppId_t topmost = 0;
+        if (msg.games_played_size() > 0) {
+            topmost = static_cast<AppId_t>(
+                msg.games_played(msg.games_played_size() - 1).game_id() & UINT32_MAX);
+        }
+
+        // Only track when the topmost is an unlocked AppId we can inject for.
+        // Owned games on top let the server's natural broadcast paint the
+        // cache; -onlinefix games are already handled by the OnlineFix path.
+        AppId_t newTracked = 0;
+        if (topmost != 0 && topmost != kOnlineFixAppId && LuaConfig::HasDepot(topmost))
+            newTracked = topmost;
+
+        if (g_PlayingAppId == newTracked) return;
+        g_PlayingAppId = newTracked;
+
+        if (newTracked != 0) {
+            LOG_RICHPRESENCE_INFO("Tracking topmost appid {}", newTracked);
+            if (BuildInject(newTracked)) g_InjectPending = true;
+        } else if (topmost == 0) {
+            // Stack went empty — inject a clear so the cache reverts.
+            LOG_RICHPRESENCE_DEBUG("GamesPlayed empty, scheduling cache clear");
+            if (BuildInject(0)) g_InjectPending = true;
+        } else {
+            // Topmost is owned (or -onlinefix); let the server's broadcast
+            // paint it.  Skipping the clear-inject here avoids a brief
+            // "Online" flicker between our drop and the server's push.
+            LOG_RICHPRESENCE_DEBUG("Topmost is appid {} (owned or onlinefix); deferring to server", topmost);
+        }
+    }
+
+    // Cache real self-pushes as the inject template; if we are tracking
+    // an unowned game, patch the live message in place so a periodic
+    // refresh does not overwrite the injected game info.
+    bool HandleRecv(const uint8* pBody, uint32 cbBody, const uint8* pHdr, uint32 cbHdr)
+    {
+        CMsgClientPersonaState msg;
+        if (!msg.ParseFromArray(pBody, cbBody)) return false;
+
+        CMsgClientPersonaState::Friend* selfEntry = nullptr;
+        for (int i = 0; i < msg.friends_size(); ++i) {
+            auto* f = msg.mutable_friends(i);
+            if (f->has_friendid() && f->friendid() == g_LocalSteamId) {
+                selfEntry = f;
+                break;
+            }
+        }
+        if (!selfEntry) return false;
+
+        LOG_RICHPRESENCE_DEBUG(
+            "Recv self PersonaState: status_flags=0x{:X} friends_size={}",
+            msg.status_flags(), msg.friends_size());
+
+        if (cbHdr <= sizeof(g_SelfHdr) && cbBody <= sizeof(g_SelfBody)) {
+            memcpy(g_SelfHdr,  pHdr,  cbHdr);
+            memcpy(g_SelfBody, pBody, cbBody);
+            g_cbSelfHdr      = cbHdr;
+            g_cbSelfBody     = cbBody;
+            g_HaveSelfCached = true;
+        }
+
+        if (g_PlayingAppId == 0) return false;
+
+        ApplyGameFields(msg, selfEntry, g_PlayingAppId);
+        g_cbNewBody = static_cast<uint32>(msg.ByteSizeLong());
+        if (g_cbNewBody > kMaxBodySize) {
+            LOG_RICHPRESENCE_WARN("In-place patch too large ({} bytes)", g_cbNewBody);
+            return false;
+        }
+        if (!msg.SerializeToArray(g_NewBody, kMaxBodySize)) {
+            LOG_RICHPRESENCE_WARN("In-place patch SerializeToArray failed");
+            return false;
+        }
+        LOG_RICHPRESENCE_INFO("Patched live self push with appid {}", g_PlayingAppId);
+        return true;
+    }
+
+    // Deliver the pending manufactured PersonaState by borrowing the
+    // carrier's data pointer for one oRecvPkt call, then restore.
+    void TryInject(void* pThis, CNetPacket* pCarrier,
+                   bool (*invokeOriginal)(void*, CNetPacket*))
+    {
+        if (!g_InjectPending || g_cbInjectPkt == 0) return;
+        g_InjectPending = false;
+
+        uint8* origData = pCarrier->m_pubData;
+        uint32 origSize = pCarrier->m_cubData;
+        pCarrier->m_pubData = g_InjectPkt;
+        pCarrier->m_cubData = g_cbInjectPkt;
+        invokeOriginal(pThis, pCarrier);
+        pCarrier->m_pubData = origData;
+        pCarrier->m_cubData = origSize;
+        LOG_RICHPRESENCE_INFO("Delivered manufactured self-PersonaState ({} bytes)", g_cbInjectPkt);
+    }
+
+} // namespace Hooks_NetPacket_RichPresence
+
+
+// ════════════════════════════════════════════════════════════════
 //  Hooks_NetPacket_OnlineFix
 //
 //  Outgoing: CMsgClientGamesPlayed (eMsg 742 / 5410)
@@ -574,7 +857,8 @@ namespace Hooks_NetPacket_Manifest {
 // ════════════════════════════════════════════════════════════════
 namespace Hooks_NetPacket_OnlineFix {
 
-    bool HandleSend(const uint8* pBody, uint32 cbBody)
+    bool HandleSend(const uint8* pBody, uint32 cbBody,
+                    const uint8* pHdr, uint32 cbHdr)
     {
         CMsgClientGamesPlayed msg;
         if (!msg.ParseFromArray(pBody, cbBody)) {
@@ -582,6 +866,8 @@ namespace Hooks_NetPacket_OnlineFix {
             return false;
         }
         LOG_ONLINEFIX_DEBUG("OnlineFix: original body:\n{}", msg.DebugString());
+
+        Hooks_NetPacket_RichPresence::TrackSend(msg, pHdr, cbHdr);
 
         bool patched = false;
         for (int i = 0; i < msg.games_played_size(); ++i) {
@@ -670,7 +956,11 @@ namespace {
 
         case k_EMsgClientGamesPlayed:                 // 742
         case k_EMsgClientGamesPlayedWithDataBlob:     // 5410
-            g_NeedReplaceSend = Hooks_NetPacket_OnlineFix::HandleSend(pBody, cbBody);
+            g_NeedReplaceSend = Hooks_NetPacket_OnlineFix::HandleSend(pBody, cbBody, pHdr, cbHdr);
+            return;
+
+        case k_EMsgClientRichPresenceUpload:           // 7501
+            Hooks_NetPacket_RichPresence::TrackRPSend(pBody, cbBody);
             return;
 
         case k_EMsgClientGetUserStats:               // 818
@@ -744,6 +1034,10 @@ namespace {
             Hooks_NetPacket_FamilySharing::ClearBody(pBody, cbBody);
             return;
 
+        case k_EMsgClientPersonaState:                 // 766
+            g_NeedReplaceBody = Hooks_NetPacket_RichPresence::HandleRecv(pBody, cbBody, pHdr, cbHdr);
+            return;
+
         default:
             return;
         }
@@ -763,6 +1057,7 @@ namespace {
         EMsg eMsg;
         const uint8 *pHdr, *pBody;
         uint32 cbHdr, cbBody;
+        bool result;
         if (UnpackRaw(pubData, cubData, eMsg, pHdr, cbHdr, pBody, cbBody)) {
             SendJob(eMsg, pBody, cbBody, pHdr, cbHdr);
 
@@ -770,15 +1065,25 @@ namespace {
                 uint32 newSize = 0;
                 uint8* buf = ReplaceSendPacket(pubData, cbHdr, pHdr,
                                                g_SendNewBody, g_cbSendNewBody, &newSize);
-                if (buf)
-                    return oBBuildAndAsyncSendFrame(pObject, eWebSocketOpCode, buf, newSize);
+                result = buf
+                    ? oBBuildAndAsyncSendFrame(pObject, eWebSocketOpCode, buf, newSize)
+                    : oBBuildAndAsyncSendFrame(pObject, eWebSocketOpCode, pubData, cubData);
+            } else {
+                result = oBBuildAndAsyncSendFrame(pObject, eWebSocketOpCode, pubData, cubData);
             }
+        } else {
+            result = oBBuildAndAsyncSendFrame(pObject, eWebSocketOpCode, pubData, cubData);
         }
-        return oBBuildAndAsyncSendFrame(pObject, eWebSocketOpCode, pubData, cubData);
+
+        return result;
     }
 
     HOOK_FUNC(RecvPkt, void*, void* pThis, CNetPacket* pPacket)
     {
+        Hooks_NetPacket_RichPresence::TryInject(
+            pThis, pPacket,
+            [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, pP) != nullptr; });
+
         EMsg eMsg;
         const uint8 *pBody, *pHdr;
         uint32 cbBody, cbHdr;
