@@ -260,8 +260,7 @@ namespace Hooks_NetPacket_UserStats {
     }
 
     // ── Recv: CPlayer_GetUserStats_Response (eMsg 147) ─────────
-    //     Ensure eresult=OK in the header so the caller accepts the
-    //     response (the send handler rewrote appid to the real game).
+    //     ensure eresult=OK in the header so caller accepts the response
     void HandleRecv_GetUserStatsResponse(const uint8* pHdr, uint32 cbHdr,
                                     const uint8* pBody, uint32 cbBody)
     {
@@ -320,8 +319,8 @@ namespace Hooks_NetPacket_UserStats {
     }
 
     // ── Recv: CMsgClientGetUserStatsResponse (eMsg 819) ────────
-    //     Rewrite game_id back to 480 and ensure eresult=OK so the
-    //     caller (on pipe 480) accepts the response.
+    //     Ensure eresult=OK. Keep game_id as the real AppId so the
+    //     overlay uses correct icons and game context for display.
     bool HandleRecv_ClientGetUserStatsResponse(const uint8* pBody, uint32 cbBody)
     {
         CMsgClientGetUserStatsResponse resp;
@@ -335,19 +334,9 @@ namespace Hooks_NetPacket_UserStats {
             ? static_cast<AppId_t>(resp.game_id() & 0xFFFFFF)
             : kOnlineFixAppId;
 
-        // Only rewrite for the game's pipe (AppId=480), not SAM's pipe.
-        // Check via GetAppIDForCurrentPipe which returns the current thread's
-        // pipe AppId.
-        AppId_t pipeAppId = Hooks_Misc::GetAppIDForCurrentPipe();
-        AppId_t onlineFixRealAppId = Hooks_Misc::GetOnlineFixRealAppId();
-        if (onlineFixRealAppId != 0
-            && pipeAppId == kOnlineFixAppId
-            && respAppId == onlineFixRealAppId
-            && respAppId != kOnlineFixAppId
-            && LuaConfig::HasDepot(respAppId)) {
-            LOG_ACHIEVEMENT_INFO("ClientGetUserStats response: game_id {} -> 480", respAppId);
-            resp.set_game_id(kOnlineFixAppId);
-        }
+        // Keep game_id as the real AppId so the overlay uses the
+        // correct game context for achievement icons and names.
+        (void)respAppId;
 
         resp.set_eresult(k_EResultOK);
 
@@ -365,13 +354,12 @@ namespace Hooks_NetPacket_UserStats {
 // ════════════════════════════════════════════════════════════════
 //  Hooks_NetPacket_StoreStats
 //
-//  Outgoing: CMsgClientStoreUserStats (eMsg 820)
-//  Incoming: CMsgClientStoreUserStatsResponse (eMsg 821)
+//  outgoing: CMsgClientStoreUserStats (eMsg 820)
+//  incoming: CMsgClientStoreUserStatsResponse (eMsg 821)
 //
-//  Rewrites game_id from 480 → realAppId so achievements are saved
-//  under the correct game on the backend.
+//  rerwites game_id from 480 → realAppId so achievements are saved under the correct game on the backend.
 //
-//  Wire format (no compiled proto for this message):
+//  wire format (no compiled proto for this):
 //    field  1: game_id           (fixed64, tag 0x09, 8 bytes)
 //    field  2: steam_id_for_user (fixed64, tag 0x11, 8 bytes)
 //    response field 2: eresult   (varint,  tag 0x10)
@@ -383,8 +371,8 @@ namespace Hooks_NetPacket_StoreStats {
         // CMsgClientStoreUserStats:
         //   field 1: game_id (fixed64, tag 0x09, 8 bytes LE)
         //   field 2: steam_id_for_user (fixed64, tag 0x11, 8 bytes LE)
-        // We only rewrite field 1 (game_id 480 → realAppId).
-        // Only modify requests on the game's pipe (480)
+        // only rewrite field 1 (game_id 480 → realAppId).
+        // only modify requests on the game's pipe (480)
         if (!pBody || cbBody < 9 || pBody[0] != 0x09) return false;
 
         uint64_t gameId = 0;
@@ -392,21 +380,20 @@ namespace Hooks_NetPacket_StoreStats {
         AppId_t appId = static_cast<AppId_t>(gameId & 0xFFFFFF);
 
         if (appId != kOnlineFixAppId) {
-            // Not our game's StoreStats — leave untouched
+            // skip if not our game's StoreStats
             return false;
         }
 
-        // game_id is 480 — rewrite to real AppId
+        // rewrite to real appid if game_id is 480
         AppId_t realAppId = Hooks_Misc::ResolveAppId();
         if (!realAppId || !LuaConfig::HasDepot(realAppId)) return false;
 
-        // Always copy the original body first
+        // copy the original body first
         memcpy(g_SendNewBody, pBody, cbBody);
         uint64_t realGameId = realAppId;
         memcpy(g_SendNewBody + 1, &realGameId, 8);
 
-        // Insert or rewrite steam_id_for_user so the backend saves
-        // the unlock to the correct account that owns the game.
+        // insert or rewrite steam_id_for_user
         uint64_t newSteamId = LuaConfig::GetStatSteamId(realAppId);
         if (newSteamId) {
             if (cbBody >= 18 && pBody[9] == 0x11) {
@@ -431,15 +418,13 @@ namespace Hooks_NetPacket_StoreStats {
         // CMsgClientStoreUserStatsResponse wire format:
         //   field 1: game_id (fixed64, tag 0x09, 8 bytes LE)
         //   field 2: eresult  (varint,  tag 0x10)
-        // Keep game_id as-is (realAppId) so the overlay notification
-        // fires for the running game; just ensure eresult=OK.
+        // Just ensure eresult=OK so the overlay notification fires.
         if (!pBody || cbBody < 10 || pBody[0] != 0x09) return;
 
-        // Find eresult tag (0x10) and set to OK
         for (uint32 i = 9; i < cbBody; ++i) {
             if (pBody[i] == 0x10) {
                 memcpy(g_NewBody, pBody, cbBody);
-                g_NewBody[i + 1] = 1; // eresult = OK
+                g_NewBody[i + 1] = 1;
                 g_cbNewBody = cbBody;
                 g_NeedReplaceBody = true;
                 break;

@@ -39,8 +39,8 @@ namespace {
     // lua-added game is launched; cleared on non-lua games.
     AppId_t   g_OnlineFixRealAppId;
 
-    // Thread ID of the Steam client thread that handles the game's pipe.
-    // Only rewrite SetAppIdForCurrentPipe on this thread to avoid
+    // thread ID of the Steam client thread that handles the game's pipe.
+    // only rewrite SetAppIdForCurrentPipe on this thread to avoid
     // affecting SAM (which connects on a different thread).
     DWORD     g_gamePipeThreadId = 0;
 
@@ -112,7 +112,7 @@ namespace {
     // ── SetAppIdForCurrentPipe hook ────────────────────────────
     uint32_t __fastcall hkSetAppIdForCurrentPipe(void* pSelf, uint32_t appId, bool bUnknown) {
         if (appId != 0 && appId != kOnlineFixAppId && appId == g_OnlineFixRealAppId && LuaConfig::HasDepot(appId)) {
-            // Check caller module — skip if called from steamui.dll (overlay/UI)
+            // check who called — skip if its steamui.dll (overlay/UI)
             void* retAddr = _ReturnAddress();
             HMODULE hMod = nullptr;
             bool fromUI = false;
@@ -127,9 +127,9 @@ namespace {
                 fromUI = (modName == "steamui.dll");
             }
             if (!fromUI) {
-                // First matching call on any thread → record and rewrite.
-                // Subsequent calls on the SAME thread are also rewritten.
-                // Different threads (e.g. SAM's pipe) are left untouched.
+                // first matching call on any thread → record and rewrite.
+                // subsequent calls on the SAME thread are also rewritten.
+                // different threads (e.g. SAM's pipe) are left untouched.
                 DWORD currentTid = GetCurrentThreadId();
                 if (g_gamePipeThreadId == 0) {
                     g_gamePipeThreadId = currentTid;
