@@ -312,3 +312,11 @@ message CMsgClientPersonaState {
 	optional uint32 status_flags = 1;
 	repeated .CMsgClientPersonaState.Friend friends = 2;
 }
+
+// ============================================================
+// CMsgClientRichPresenceUpload
+// ============================================================
+message CMsgClientRichPresenceUpload {
+	optional bytes rich_presence_kv = 1;
+	repeated fixed64 steamid_broadcast = 2;
+}

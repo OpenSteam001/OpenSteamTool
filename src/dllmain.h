@@ -17,6 +17,7 @@
 #include "Steam/Types.h"
 #include "Steam/Enums.h"
 #include "Steam/Structs.h"
+#include "Steam/Callback.h"
 #include "Utils/LuaConfig.h"
 #include "Utils/Log.h"
 #include "Utils/Config.h"
@@ -30,7 +31,13 @@ inline char DiversionPath[MAX_PATH] = {};
 inline char LuaDir[MAX_PATH] = {};
 inline char ConfigPath[MAX_PATH] = {};
 
-// The fake AppId used (SpaceWar).
+// Current Steam build id (digit string returned by
+// steam.exe!GetBootstrapperVersion). Populated by InitThread; empty
+// until then. Read by ByteSearch to prefer the matching label in each
+// Sigs[] array — see Utils/ByteSearch.cpp.
+inline std::string g_steamBuildId;
+
+// The fake AppId used by -onlinefix (SpaceWar).
 constexpr AppId_t kOnlineFixAppId = 480;
 
 #endif // DLLMAIN_H

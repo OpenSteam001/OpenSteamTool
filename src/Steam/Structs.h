@@ -21,6 +21,25 @@ template<typename T>
 struct CUtlVector {
 	CUtlMemory<T> m_Memory;
 	uint32 m_Size;
+
+	// Swap with last element and shrink. Does not preserve order.
+	void FastRemove(uint32 elem) {
+		if (elem < m_Size) {
+			if (elem != m_Size - 1)
+				m_Memory.m_pMemory[elem] = m_Memory.m_pMemory[m_Size - 1];
+			--m_Size;
+		}
+	}
+
+	bool FindAndFastRemove(const T& src) {
+		for (uint32 i = 0; i < m_Size; ++i) {
+			if (m_Memory.m_pMemory[i] == src) {
+				FastRemove(i);
+				return true;
+			}
+		}
+		return false;
+	}
 };
 
 struct CUtlBuffer{

@@ -7,6 +7,7 @@
 #include <atomic>
 #include <vector>
 #include <string>
+#include <unordered_map>
 
 namespace FileWatcher {
     static std::atomic<bool> g_running{false};
@@ -15,37 +16,78 @@ namespace FileWatcher {
 
     static const DWORD kDebounceMs = 500;
 
-    static void TriggerRefresh(const std::vector<std::string>& newFiles) {
-        LOG_PACKAGE_INFO("{} new Lua file(s) detected, refreshing after {}ms debounce",
-                         newFiles.size(), kDebounceMs);
-        std::this_thread::sleep_for(std::chrono::milliseconds(kDebounceMs));
+    struct FileChange {
+        std::string path;
+        DWORD action;   // FILE_ACTION_ADDED / MODIFIED / REMOVED
+    };
 
-        for (const auto& path : newFiles)
-            LuaConfig::ParseFile(path);
+    // Merge new changes into accumulated map, keeping last action per file.
+    static void MergeChanges(
+        std::unordered_map<std::string, DWORD>& accumulated,
+        std::vector<std::string>& order,
+        const std::vector<FileChange>& newChanges)
+    {
+        for (const auto& ch : newChanges) {
+            if (accumulated.find(ch.path) == accumulated.end())
+                order.push_back(ch.path);
+            accumulated[ch.path] = ch.action;
+        }
+    }
+
+    static void ProcessChanges(
+        const std::unordered_map<std::string, DWORD>& accumulated,
+        const std::vector<std::string>& order)
+    {
+        LOG_PACKAGE_INFO("Processing {} Lua file change(s)", order.size());
+        for (const auto& path : order) {
+            DWORD action = accumulated.at(path);
+            if (action == FILE_ACTION_REMOVED) {
+                LuaConfig::UnloadFile(path);
+            } else {
+                // ADDED or MODIFIED — ParseFile internally calls UnloadFile first.
+                LuaConfig::ParseFile(path);
+            }
+        }
 
         Hooks_Misc::NotifyLicenseChanged();
         LOG_PACKAGE_INFO("Refresh completed");
     }
 
-    // Collects newly created .lua filenames from the notification buffer.
-    static std::vector<std::string> CollectNewLuaFiles(
+    // Collects .lua file changes from the notification buffer.
+    // Deduplicates by filename — keeps only the last action per file.
+    static std::vector<FileChange> CollectLuaChanges(
         const char* buffer, DWORD bytesReturned, const std::string& dir)
     {
-        std::vector<std::string> result;
+        // Use a map to deduplicate: filename -> last action
+        std::unordered_map<std::string, DWORD> seen;
+        std::vector<std::string> order; // preserve first-seen order
+
         const FILE_NOTIFY_INFORMATION* info =
             reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(buffer);
         while (info) {
-            if (info->Action == FILE_ACTION_ADDED) {
+            if (info->Action == FILE_ACTION_ADDED
+                || info->Action == FILE_ACTION_MODIFIED
+                || info->Action == FILE_ACTION_REMOVED) {
                 std::wstring_view fname(info->FileName, info->FileNameLength / sizeof(wchar_t));
                 if (fname.size() >= 4 && fname.substr(fname.size() - 4) == L".lua") {
                     std::string name(fname.begin(), fname.end());
-                    LOG_PACKAGE_INFO("New Lua file: {}", name);
-                    result.push_back(dir + "\\" + name);
+                    if (seen.find(name) == seen.end())
+                        order.push_back(name);
+                    seen[name] = info->Action; // last action wins
                 }
             }
             if (info->NextEntryOffset == 0) break;
             info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(
                 reinterpret_cast<const char*>(info) + info->NextEntryOffset);
+        }
+
+        std::vector<FileChange> result;
+        for (const auto& name : order) {
+            DWORD action = seen[name];
+            LOG_PACKAGE_INFO("Lua file {}: {}",
+                action == FILE_ACTION_ADDED ? "added" :
+                action == FILE_ACTION_MODIFIED ? "modified" : "removed", name);
+            result.push_back({dir + "\\" + name, action});
         }
         return result;
     }
@@ -53,7 +95,7 @@ namespace FileWatcher {
     static bool IssueRead(HANDLE dir, char* buf, DWORD bufSize, OVERLAPPED* ov) {
         DWORD dummy = 0;
         if (!ReadDirectoryChangesW(dir, buf, bufSize, FALSE,
-                                   FILE_NOTIFY_CHANGE_FILE_NAME,
+                                   FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
                                    &dummy, ov, nullptr)) {
             if (GetLastError() != ERROR_IO_PENDING) {
                 LOG_PACKAGE_WARN("ReadDirectoryChangesW failed: {}", GetLastError());
@@ -115,21 +157,40 @@ namespace FileWatcher {
             if (waitResult == WAIT_TIMEOUT) continue;
             if (waitResult < WAIT_OBJECT_0 || waitResult >= WAIT_OBJECT_0 + numDirs) continue;
 
-            size_t idx = waitResult - WAIT_OBJECT_0;
-            HANDLE dir = dirHandles[idx];
-            if (!dir) continue;
+            // First event arrived — collect it and start debounce window.
+            // Keep draining events until no new events arrive within kDebounceMs.
+            std::unordered_map<std::string, DWORD> accumulated;
+            std::vector<std::string> order;
 
-            DWORD bytesReturned = 0;
-            if (GetOverlappedResult(dir, &overlapped[idx], &bytesReturned, FALSE)
-                && bytesReturned > 0) {
-                auto newFiles = CollectNewLuaFiles(
-                    buffers[idx].data(), bytesReturned, g_watchDirs[idx]);
-                if (!newFiles.empty())
-                    TriggerRefresh(newFiles);
+            auto drainEvent = [&](size_t idx) {
+                HANDLE dir = dirHandles[idx];
+                if (!dir) return;
+                DWORD bytesReturned = 0;
+                if (GetOverlappedResult(dir, &overlapped[idx], &bytesReturned, FALSE)
+                    && bytesReturned > 0) {
+                    auto changes = CollectLuaChanges(
+                        buffers[idx].data(), bytesReturned, g_watchDirs[idx]);
+                    MergeChanges(accumulated, order, changes);
+                }
+                // Re-arm immediately so we catch events during debounce
+                IssueRead(dir, buffers[idx].data(),
+                          static_cast<DWORD>(buffers[idx].size()), &overlapped[idx]);
+            };
+
+            drainEvent(waitResult - WAIT_OBJECT_0);
+
+            // Debounce loop: keep waiting for more events
+            while (g_running) {
+                DWORD debounceResult = WaitForMultipleObjects(
+                    static_cast<DWORD>(numDirs), events.data(), FALSE, kDebounceMs);
+                if (!g_running) break;
+                if (debounceResult == WAIT_TIMEOUT) break; // quiet period — done accumulating
+                if (debounceResult < WAIT_OBJECT_0 || debounceResult >= WAIT_OBJECT_0 + numDirs) break;
+                drainEvent(debounceResult - WAIT_OBJECT_0);
             }
 
-            IssueRead(dir, buffers[idx].data(),
-                      static_cast<DWORD>(buffers[idx].size()), &overlapped[idx]);
+            if (!order.empty())
+                ProcessChanges(accumulated, order);
         }
 
         for (auto& h : dirHandles) if (h) CloseHandle(h);

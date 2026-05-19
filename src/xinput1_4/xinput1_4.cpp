@@ -1,8 +1,6 @@
 // xinput1_4.dll HiJack Project - True Dynamic Wrapper (With Undocumented Ordinals)
 #include <windows.h>
-#include <cstdio>
 #include <cstring>
-#include <detours.h>
 #include <string>
 
 // ─── 1. Real XInput Function Pointers ───────────────────────────
@@ -121,40 +119,7 @@ extern "C" {
     }
 }
 
-// ─── 4. Original Developer's Detours & Injection Logic ────────────
-static HMODULE g_OldModule = nullptr;
-
-typedef HMODULE(WINAPI* LoadLibraryExW_t)(LPCWSTR, HANDLE, DWORD);
-static LoadLibraryExW_t oLoadLibraryExW = nullptr;
-
-HMODULE WINAPI hkLoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
-    if (lpLibFileName) {
-        if (g_OldModule && _wcsicmp(lpLibFileName, L"xinput1_4.dll") == 0) {
-            return g_OldModule;
-        }
-    }
-    return oLoadLibraryExW(lpLibFileName, hFile, dwFlags);
-}
-
-static void InstallHook() {
-    oLoadLibraryExW = reinterpret_cast<LoadLibraryExW_t>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "LoadLibraryExW"));
-    if (!oLoadLibraryExW) return;
-
-    DetourTransactionBegin();
-    DetourUpdateThread(GetCurrentThread());
-    DetourAttach(reinterpret_cast<PVOID*>(&oLoadLibraryExW), reinterpret_cast<PVOID>(hkLoadLibraryExW));
-    DetourTransactionCommit();
-}
-
-static void UninstallHook() {
-    if (!oLoadLibraryExW) return;
-    DetourTransactionBegin();
-    DetourUpdateThread(GetCurrentThread());
-    DetourDetach(reinterpret_cast<PVOID*>(&oLoadLibraryExW), reinterpret_cast<PVOID>(hkLoadLibraryExW));
-    DetourTransactionCommit();
-    oLoadLibraryExW = nullptr;
-}
-
+// ─── 4. OpenSteamTool Injection ───────────────────────────────────
 BOOL OpenSteamToolLoad() {
     char exePath[MAX_PATH];
     if (GetModuleFileNameA(NULL, exePath, MAX_PATH)) {
@@ -168,24 +133,9 @@ BOOL OpenSteamToolLoad() {
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved) {
     switch (dwReason) {
     case DLL_PROCESS_ATTACH:
-    {
         DisableThreadLibraryCalls(hModule);
-        g_OldModule = hModule;
-
-        HMODULE pinned = nullptr;
-        GetModuleHandleExW(
-            GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-            reinterpret_cast<LPCWSTR>(&hkLoadLibraryExW),
-            &pinned);
-
         LoadRealXInput();
-        InstallHook();
-
         if (!OpenSteamToolLoad()) return FALSE;
-        break;
-    }
-    case DLL_PROCESS_DETACH:
-        UninstallHook();
         break;
     }
     return TRUE;

@@ -30,6 +30,28 @@ bool LoadDiversion()
     return true;
 }
 
+// Resolve the current Steam build id from steam.exe!GetBootstrapperVersion
+// once at startup. ByteSearch uses this string as the preferred-match
+// label so it picks the Sigs[] entry built for the running build before
+// falling back to try-all order (see Utils/ByteSearch.cpp).
+static void DetectSteamBuildId() {
+    using GetBootstrapperVersion_t = int64_t (*)();
+    HMODULE hSteam = GetModuleHandleA("steam.exe");
+    if (!hSteam) {
+        LOG_WARN("SteamVersion: steam.exe module not loaded; build id unavailable");
+        return;
+    }
+    auto fn = reinterpret_cast<GetBootstrapperVersion_t>(
+        GetProcAddress(hSteam, "GetBootstrapperVersion"));
+    if (!fn) {
+        LOG_WARN("SteamVersion: steam.exe!GetBootstrapperVersion not exported; "
+                 "ByteSearch will fall back to try-all order");
+        return;
+    }
+    g_steamBuildId = std::to_string(fn());
+    LOG_INFO("SteamVersion: build id = {}", g_steamBuildId);
+}
+
 // All initialisation that touches the filesystem, calls LoadLibrary, scans
 // memory, or installs detours runs here on a worker thread — we MUST NOT do
 // any of that from inside DllMain (loader lock).
@@ -37,6 +59,8 @@ static DWORD WINAPI InitThread(LPVOID param) {
     HMODULE selfModule = static_cast<HMODULE>(param);
     Log::Init(selfModule);
     LOG_INFO("OpenSteamTool init thread started");
+
+    DetectSteamBuildId();
 
     if (!LoadDiversion()) {
         LOG_ERROR("LoadDiversion failed");

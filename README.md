@@ -1,5 +1,11 @@
 # OpenSteamTool
 
+![cpp](https://img.shields.io/badge/cpp-20%2B-green?logo=cplusplus)
+![CMake](https://img.shields.io/badge/CMake-3.20%2B-green?logo=cmake)
+![OnlyWindows](https://img.shields.io/badge/windows%20only-red?style=for-the-badge)
+
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/OpenSteam001/OpenSteamTool)
+
 OpenSteamTool is a Windows DLL project built with CMake.
 
 ## Feature
@@ -12,8 +18,8 @@ OpenSteamTool is a Windows DLL project built with CMake.
 - Support downloading protected games or DLCs that require an access token.
 - Support binding manifest to prevent specific games from being updated.
 
-### Hot reload on new .lua files: 
-- adding a `.lua` file to any watched directory automatically triggers a full reload. No restart, no offline/online toggle needed. Note: only additions are detected; removing or modifying an existing .lua file does not trigger a reload, and revoking is not supported.
+### Hot Reload
+- Adding, modifying, deleting, or overwriting `.lua` files in any watched directory automatically triggers a reload. No restart, no offline/online toggle needed.
 
 ### Family Sharing and Remote Play
 - Bypass Steam Family Sharing restrictions, allowing shared games to be played without limitations.
@@ -128,7 +134,8 @@ Debug builds write per-module log files under `<Steam>/opensteamtool/`:
 | `winhttp.log`       | `LOG_WINHTTP_*` | HTTP requests  |
 | `achievement.log`   | `LOG_ACHIEVEMENT_*` | UserStats requests/responses, steamid spoofing |
 | `pics.log`          | `LOG_PICS_*` | PICS access token injection |
-| `package.log`       | `LOG_PACKAGE_*` | Package injection |
+| `package.log`       | `LOG_PACKAGE_*` | Package injection, FileWatcher events |
+| `onlinefix.log`     | `LOG_ONLINEFIX_*` | Online fix (480 AppId spoofing) |
 
 The log level is controlled by `[log] level` in `opensteamtool.toml`.
 

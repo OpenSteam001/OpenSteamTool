@@ -5,6 +5,11 @@
 #include <string>
 #include <vector>
 
+// Populated by dllmain.cpp / InitThread from steam.exe!GetBootstrapperVersion.
+// Empty before init or when the export is unavailable; in that case we
+// fall back to the legacy try-all-in-order behaviour.
+extern std::string g_steamBuildId;
+
 // ---- parse "48 8B ?? C4" → bytes + mask ----
 static bool ParseSignature(const char* str, std::vector<uint8_t>& bytes, std::vector<uint8_t>& mask)
 {
@@ -72,56 +77,58 @@ static void* ScanOne(HMODULE module, const std::vector<uint8_t>& bytes,
     return nullptr;
 }
 
-// ---- multi-signature search ----
-void* ByteSearch(HMODULE module, const char* funcName, std::initializer_list<Signature> sigs)
+// ---- try a single Signature against the module ----
+static void* TrySig(HMODULE module, const char* funcName, const Signature& sig)
 {
     std::vector<uint8_t> bytes, mask;
-
-    for (const auto& sig : sigs) {
-        if (!ParseSignature(sig.signature, bytes, mask)) {
-            LOG_WARN("ByteSearch: {} — bad signature '{}'", funcName ? funcName : "", sig.label);
-            continue;
-        }
-        void* addr = ScanOne(module, bytes, mask, sig.matchIndex);
-        if (addr) {
-            if (funcName)
-                LOG_DEBUG("ByteSearch: {} matched '{}'", funcName, sig.label);
-            return addr;
-        }
+    if (!ParseSignature(sig.signature, bytes, mask)) {
+        LOG_WARN("ByteSearch: {} — bad signature '{}'", funcName ? funcName : "", sig.label);
+        return nullptr;
     }
-
-    // all failed
-    if (!funcName) return nullptr;          // single-sig caller handles its own log
-
-    std::string failedList;
-    for (const auto& sig : sigs) {
-        if (!failedList.empty()) failedList += ", ";
-        failedList += "'";
-        failedList += sig.label;
-        failedList += "'";
-    }
-    LOG_WARN("ByteSearch FAILED: {} — tried: {}", funcName, failedList);
-    return nullptr;
+    return ScanOne(module, bytes, mask, sig.matchIndex);
 }
 
-// ---- pointer + count overload ----
-void* ByteSearch(HMODULE module, const char* funcName, const Signature* sigs, size_t count)
+// ---- core multi-sig dispatcher ----
+// Patterns.h labels are now Steam build ids (e.g. "1778803745"). When
+// g_steamBuildId is populated, we try the entry whose label matches the
+// currently running Steam build FIRST. If that fails (or no exact match
+// exists in the array), fall through to the legacy try-all-in-order so
+// any close match still wins. Empty g_steamBuildId (pre-init or older
+// Steam without the export) collapses to the pure legacy behaviour.
+static void* ByteSearchImpl(HMODULE module, const char* funcName,
+                            const Signature* sigs, size_t count)
 {
-    std::vector<uint8_t> bytes, mask;
-
-    for (size_t i = 0; i < count; ++i) {
-        if (!ParseSignature(sigs[i].signature, bytes, mask)) {
-            LOG_WARN("ByteSearch: {} — bad signature '{}'", funcName ? funcName : "", sigs[i].label);
-            continue;
+    // 1. Preferred-label fast path.
+    if (!g_steamBuildId.empty()) {
+        for (size_t i = 0; i < count; ++i) {
+            if (sigs[i].label && g_steamBuildId == sigs[i].label) {
+                if (void* addr = TrySig(module, funcName, sigs[i])) {
+                    if (funcName)
+                        LOG_DEBUG("ByteSearch: {} matched build-id '{}'",
+                                  funcName, sigs[i].label);
+                    return addr;
+                }
+                if (funcName)
+                    LOG_DEBUG("ByteSearch: {} build-id '{}' did NOT match, "
+                              "falling back to try-all", funcName, sigs[i].label);
+                break;  // at most one entry per build id; stop searching the array
+            }
         }
-        void* addr = ScanOne(module, bytes, mask, sigs[i].matchIndex);
-        if (addr) {
+    }
+
+    // 2. Fallback: legacy try-all-in-declared-order.
+    for (size_t i = 0; i < count; ++i) {
+        // Skip the preferred entry we already tried (no point retrying it).
+        if (!g_steamBuildId.empty() && sigs[i].label && g_steamBuildId == sigs[i].label)
+            continue;
+        if (void* addr = TrySig(module, funcName, sigs[i])) {
             if (funcName)
-                LOG_DEBUG("ByteSearch: {} matched '{}'", funcName, sigs[i].label);
+                LOG_DEBUG("ByteSearch: {} matched fallback '{}'", funcName, sigs[i].label);
             return addr;
         }
     }
 
+    // 3. All failed.
     if (!funcName) return nullptr;
 
     std::string failedList;
@@ -131,8 +138,22 @@ void* ByteSearch(HMODULE module, const char* funcName, const Signature* sigs, si
         failedList += sigs[i].label;
         failedList += "'";
     }
-    LOG_WARN("ByteSearch FAILED: {} — tried: {}", funcName, failedList);
+    LOG_WARN("ByteSearch FAILED: {} (build={}) — tried: {}",
+             funcName, g_steamBuildId.empty() ? "unknown" : g_steamBuildId.c_str(),
+             failedList);
     return nullptr;
+}
+
+// ---- multi-signature search (initializer_list) ----
+void* ByteSearch(HMODULE module, const char* funcName, std::initializer_list<Signature> sigs)
+{
+    return ByteSearchImpl(module, funcName, sigs.begin(), sigs.size());
+}
+
+// ---- pointer + count overload ----
+void* ByteSearch(HMODULE module, const char* funcName, const Signature* sigs, size_t count)
+{
+    return ByteSearchImpl(module, funcName, sigs, count);
 }
 
 // ---- memory patching ----

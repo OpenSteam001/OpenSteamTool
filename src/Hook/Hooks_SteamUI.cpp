@@ -5,7 +5,7 @@
 
 namespace {
     using namespace std::chrono_literals;
-    constexpr int MAX_RETRY = 10;
+    constexpr int MAX_RETRY = 20;
     constexpr auto RETRY_INTERVAL = 300ms;
 
     HOOK_FUNC(LoadModuleWithPath, HMODULE, const char* path, bool flags) {

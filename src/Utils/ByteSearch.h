@@ -19,12 +19,7 @@ void* ByteSearch(HMODULE module, const char* funcName, std::initializer_list<Sig
 // Pointer + count overload for inline arrays.
 void* ByteSearch(HMODULE module, const char* funcName, const Signature* sigs, size_t count);
 
-// Single-signature (funcName used in log messages).
-inline void* ByteSearch(HMODULE module, const char* funcName, const char* signature, int matchIndex = 1) {
-    return ByteSearch(module, funcName, { { "single-sig", signature, matchIndex } });
-}
-
-// FIND_SIG(module, LoadModuleWithPath) → finds LoadModuleWithPathSig, logs "LoadModuleWithPath"
-#define FIND_SIG(module, name) ByteSearch(module, #name, name##Sig)
+// FIND_SIG(module, LoadModuleWithPath) → finds LoadModuleWithPathSigs, logs "LoadModuleWithPath"
+#define FIND_SIG(module, name) ByteSearch(module, #name, name##Sigs, std::size(name##Sigs))
 
 int PatchMemoryBytes(void* pAddress, const void* pNewBytes, SIZE_T nSize);

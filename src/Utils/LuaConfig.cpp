@@ -21,6 +21,15 @@ namespace LuaConfig{
     std::unordered_map<uint64_t, ManifestOverride> ManifestOverrides{};
     std::unordered_map<AppId_t, uint64_t> StatSteamIdSet{};
     std::unordered_set<AppId_t> OwnedAppIdSet{};
+
+    // Per-file tracking: which depots each .lua file contributed.
+    static std::string g_currentFile;
+    static std::unordered_map<std::string, std::unordered_set<AppId_t>> g_fileDepots;
+    // Reference count: how many files provide each depot.
+    static std::unordered_map<AppId_t, uint32_t> g_depotRefCount;
+    // Depot IDs removed by UnloadFile / added by ParseFile, consumed by NotifyLicenseChanged.
+    static std::vector<AppId_t> g_pendingRemovals;
+    static std::vector<AppId_t> g_pendingAdditions;
     constexpr uint64_t kDefaultStatSteamId = 76561198028121353ULL;
 
     // Case-insensitive function registry: lowercase name → C function
@@ -145,6 +154,13 @@ namespace LuaConfig{
         // Non-empty keys have priority over existing empty keys.
         if (!Key.empty() || !DepotKeySet.count(DepotId)) {
             DepotKeySet[DepotId] = Key;
+        }
+
+        if (!g_currentFile.empty()) {
+            if (g_fileDepots[g_currentFile].insert(DepotId).second) {
+                if (++g_depotRefCount[DepotId] == 1)
+                    g_pendingAdditions.push_back(DepotId);
+            }
         }
 
         return 0;
@@ -524,9 +540,43 @@ namespace LuaConfig{
         return true;
     }
 
+    // ── per-file unload ────────────────────────────────────────
+    void UnloadFile(const std::string& filePath) {
+        auto it = g_fileDepots.find(filePath);
+        if (it == g_fileDepots.end()) return;
+
+        for (AppId_t id : it->second) {
+            LOG_PACKAGE_DEBUG("UnloadFile:Ref count for AppId {} is {}", id, g_depotRefCount[id]);
+            if (--g_depotRefCount[id] == 0) {
+                g_depotRefCount.erase(id);
+                DepotKeySet.erase(id);
+                g_pendingRemovals.push_back(id);
+            }
+        }
+
+        LOG_PACKAGE_INFO("UnloadFile: removed {} depots from {}", it->second.size(), filePath);
+        g_fileDepots.erase(it);
+    }
+
+    std::vector<AppId_t> TakePendingRemovals() {
+        std::vector<AppId_t> result;
+        result.swap(g_pendingRemovals);
+        return result;
+    }
+
+    std::vector<AppId_t> TakePendingAdditions() {
+        std::vector<AppId_t> result;
+        result.swap(g_pendingAdditions);
+        return result;
+    }
+
     // ── single-file parser ──────────────────────────────────────
     void ParseFile(const std::string& filePath) {
         if (!Initialize()) return;
+
+        // Remove old entries from this file before re-parsing.
+        UnloadFile(filePath);
+        g_currentFile = filePath;
 
         std::filesystem::path path(filePath);
         std::ifstream file(path);
@@ -580,6 +630,8 @@ namespace LuaConfig{
             LOG_INFO("manifest.lua: fetch_manifest_code_ex found");
         }
         lua_pop(g_lua_state, 1);
+
+        g_currentFile.clear();
     }
 
     // ── directory scanner ────────────────────────────────────────
@@ -598,6 +650,10 @@ namespace LuaConfig{
             if (entry.path().extension() != ".lua") continue;
             ParseFile(entry.path().string());
         }
+
+        // Initial parse — discard pending additions so NotifyLicenseChanged
+        // only sees changes that happen after startup.
+        g_pendingAdditions.clear();
     }
 
 }

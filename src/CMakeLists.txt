@@ -86,9 +86,6 @@ add_library(OpenSteamTool SHARED
 
     # Per-category hook modules
     Hook/HookManager.cpp
-    Hook/Hooks_AccessToken.cpp
-    Hook/Hooks_AppState.cpp
-    Hook/Hooks_AppTicket.cpp
     Hook/Hooks_Decryption.cpp
     Hook/Hooks_IPC.cpp
     Hook/Hooks_IPC_ISteamUser.cpp
@@ -139,7 +136,6 @@ add_library(dwmapi SHARED
 # xinput1_4.dll hijack — secondary loader DLL placed alongside Steam.
 # ---------------------------------------------------------------------------
 add_library(xinput1_4 SHARED
-    xinput4_1/xinput1_4.cpp
-    xinput4_1/xinput1_4.def
+    xinput1_4/xinput1_4.cpp
+    xinput1_4/xinput1_4.def
 )
-target_link_libraries(xinput1_4 PRIVATE detours)

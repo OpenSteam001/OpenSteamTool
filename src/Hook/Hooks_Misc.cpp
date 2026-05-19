@@ -290,34 +290,35 @@ namespace Hooks_Misc {
             return;
         }
 
-        // Collect AppIds not already present in the vector.
-        std::vector<AppId_t> allIds = LuaConfig::GetAllDepotIds();
-        std::vector<AppId_t> newIds;
-        for (AppId_t id : allIds) {
-            bool found = false;
-            for (uint32_t i = 0; i < pPkg->AppIdVec.m_Size; ++i) {
-                if (pPkg->AppIdVec.m_Memory.m_pMemory[i] == id) {
-                    found = true;
-                    break;
-                }
+        // ── Remove depots that were unloaded ──
+        std::vector<AppId_t> removals = LuaConfig::TakePendingRemovals();
+        uint32_t removedCount = 0;
+        for (AppId_t id : removals) {
+            if (pPkg->AppIdVec.FindAndFastRemove(id)) {
+                ++removedCount;
+                LOG_PACKAGE_DEBUG("NotifyLicenseChanged: removed AppId {}", id);
             }
-            if (!found) newIds.push_back(id);
         }
 
-        if (newIds.empty()) {
-            LOG_PACKAGE_DEBUG("NotifyLicenseChanged: no new AppIds to insert");
-            return;
-        } else {
+        // ── Add depots that are newly loaded ──
+        std::vector<AppId_t> additions = LuaConfig::TakePendingAdditions();
+        if (!additions.empty()) {
             uint32_t oldSize = pPkg->AppIdVec.m_Size;
-            oCUtlMemoryGrow(&pPkg->AppIdVec, static_cast<uint32>(newIds.size()));
-            for (size_t i = 0; i < newIds.size(); ++i) {
-                pPkg->AppIdVec.m_Memory.m_pMemory[oldSize + i] = newIds[i];
-                LOG_PACKAGE_DEBUG("NotifyLicenseChanged: inserted AppId {} at [{}]", newIds[i], oldSize + i);
+            oCUtlMemoryGrow(&pPkg->AppIdVec, static_cast<uint32>(additions.size()));
+            for (size_t i = 0; i < additions.size(); ++i) {
+                pPkg->AppIdVec.m_Memory.m_pMemory[oldSize + i] = additions[i];
+                LOG_PACKAGE_DEBUG("NotifyLicenseChanged: inserted AppId {} at [{}]", additions[i], oldSize + i);
             }
         }
+
+        if (additions.empty() && removedCount == 0) {
+            LOG_PACKAGE_DEBUG("NotifyLicenseChanged: no changes");
+            return;
+        }
+
         // Mark package 0 as changed and trigger library refresh.
         oMarkLicenseAsChanged(g_pCUser, 0, true);
         oProcessPendingLicenseUpdates(g_pCUser);
-        LOG_PACKAGE_INFO("NotifyLicenseChanged: triggered, {} new AppIds inserted", newIds.size());
+        LOG_PACKAGE_INFO("NotifyLicenseChanged: {} added, {} removed", additions.size(), removedCount);
     }
 }

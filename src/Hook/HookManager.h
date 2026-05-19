@@ -10,7 +10,6 @@ namespace SteamUI {
 }
 
 namespace SteamClient {
-    void PatchBinary();
     void CoreHook();
     void CoreUnhook();
 }
