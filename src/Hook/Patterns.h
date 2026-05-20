@@ -29,6 +29,11 @@ inline const Signature BuildDepotDependencySigs[] = {
     {"1778281814", "48 8B C4 4C 89 48 20 89 50 10 48 89 48 08 55 ?? 48 8D"},  // stable
 };
 
+inline const Signature BuildSpawnEnvBlockSigs[] = {
+    {"1779155395", "4C 89 4C 24 ?? 4C 89 44 24 ?? 48 89 54 24 ?? 48 89 4C 24 ?? 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 48 8B 05"},  // beta
+    {"1778281814", "48 89 5C 24 ?? 4C 89 44 24 ?? 48 89 54 24 ?? 48 89 4C 24 ?? 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 48 8B 05"},  // stable
+};
+
 inline const Signature CUtlBufferEnsureCapacitySigs[] = {
     {"1778803745", "48 89 5C 24 08 57 48 83 EC 30 48 8B D9 8D"},  // beta
     {"1778281814", "48 89 5C 24 ?? 57 48 83 EC ?? 0F B6 41 ?? 8D 7A"},  // stable
@@ -92,6 +97,11 @@ inline const Signature LoadPackageSigs[] = {
 inline const Signature MarkLicenseAsChangedSigs[] = {
     {"1778803745", "48 89 5C 24 20 89 54 24 10 55 56 57 48 83 EC 20"},  // beta
     {"1778281814", "89 54 24 ?? 53 55 56 57 41 56 48 83 EC"},  // stable
+};
+
+inline const Signature OptedInMaskSigs[] = {
+    {"1779155395", "89 54 24 ?? 55 53 56 57 41 54 41 55 48 8D AC 24"},  // beta
+    {"1778281814", "89 54 24 ?? 55 53 56 41 55 41 56 41 57"},  // stable
 };
 
 inline const Signature PchMsgNameFromEMsgSigs[] = {

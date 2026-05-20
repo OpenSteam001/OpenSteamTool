@@ -97,6 +97,45 @@ namespace {
 
         return EXCEPTION_CONTINUE_SEARCH;
     }
+
+    // ── SteamController_OptedInMask ──────────────────────────────────────────
+    // Called by CUser_BuildSpawnEnvBlock with pGameID's appid to
+    // compute EnableConfiguratorSupport and the SDL_* env vars.
+    // With 480 the spawned game inherits Spacewar's Steam Input
+    // opt-in and gameoverlayrenderer hijacks the XInput stream.
+    HOOK_FUNC(OptedInMask, __int64,
+              void* pThis, unsigned int appId)
+    {
+        if (appId == kOnlineFixAppId && g_OnlineFixRealAppId) {
+            LOG_MISC_INFO("OptedInMask: appid {} -> {}",
+                          appId, g_OnlineFixRealAppId);
+            return oOptedInMask(pThis, g_OnlineFixRealAppId);
+        }
+        return oOptedInMask(pThis, appId);
+    }
+
+    // ── CUser_BuildSpawnEnvBlock ─────────────────────────────────────────────
+    // pOverlayCGameID drives SteamOverlayGameId, which the in-game
+    // overlay reads for screenshot tags, community URLs, and asset
+    // selection.  pCGameID drives SteamGameId / SteamAppId; leave it
+    // at 480 so the in-game ownership bypass holds.
+    HOOK_FUNC(BuildSpawnEnvBlock, __int64,
+              void* pThis, uint64_t* pCGameID, void* a3, void* env,
+              uint64_t* pOverlayCGameID, void* a6, int a7,
+              void* a8, void* a9, unsigned int a10, char a11)
+    {
+        if (g_OnlineFixRealAppId && pOverlayCGameID
+            && (*pOverlayCGameID & 0xFFFFFF) == kOnlineFixAppId) {
+            uint64_t prev = *pOverlayCGameID;
+            *pOverlayCGameID = (prev & ~static_cast<uint64_t>(0xFFFFFF))
+                             | g_OnlineFixRealAppId;
+            LOG_MISC_INFO("BuildSpawnEnvBlock: overlay CGameID {:#x} -> {:#x}",
+                          prev, *pOverlayCGameID);
+        }
+        return oBuildSpawnEnvBlock(pThis, pCGameID, a3, env,
+                                    pOverlayCGameID, a6, a7,
+                                    a8, a9, a10, a11);
+    }
 }
 
 namespace Hooks_Misc {
@@ -113,9 +152,19 @@ namespace Hooks_Misc {
 
         if (!g_captures.empty() || g_spawnProcessTarget)
             g_vehHandle = AddVectoredExceptionHandler(1, VehHandler);
+
+        HOOK_BEGIN();
+        INSTALL_HOOK_D(BuildSpawnEnvBlock);
+        INSTALL_HOOK_D(OptedInMask);
+        HOOK_END();
     }
 
     void Uninstall() {
+        UNHOOK_BEGIN();
+        UNINSTALL_HOOK(BuildSpawnEnvBlock);
+        UNINSTALL_HOOK(OptedInMask);
+        UNHOOK_END();
+
         if (g_vehHandle) {
             RemoveVectoredExceptionHandler(g_vehHandle);
             g_vehHandle = nullptr;
