@@ -1,16 +1,54 @@
+#include "Hooks_SteamUI.h"
 #include "HookManager.h"
 #include "HookMacros.h"
+#include "dllmain.h"
 #include <thread>
 #include <chrono>
 
 namespace {
     using namespace std::chrono_literals;
-    constexpr int MAX_RETRY = 20;
+    constexpr int  MAX_RETRY      = 20;
     constexpr auto RETRY_INTERVAL = 300ms;
+
+    // ── function type aliases (alphabetical) ─────────────────────────────────
+    using AddProtobufAsBinary_t   = void*(__fastcall*)(void* /*args*/, void* /*proto*/);
+    using AppOverviewChangeCtor_t = void*(__fastcall*)(void* /*proto*/, void* /*arena*/);
+    using GetAppByID_t            = void*(__fastcall*)(void* /*controller*/, AppId_t, bool /*create*/);
+    using GetTopManager_t         = void*(__fastcall*)();
+
+    // ── resolved function pointers ───────────────────────────────────────────
+    AddProtobufAsBinary_t   oAddProtobufAsBinary   = nullptr;
+    AppOverviewChangeCtor_t oAppOverviewChangeCtor = nullptr;
+    GetAppByID_t            oGetAppByID            = nullptr;
+    GetTopManager_t         oGetTopManager         = nullptr;
+
+    // CSteamUIAppController offsets (see its Validate() method):
+    //   +0xAB8 from top-manager -> CSteamUIAppController*
+    //   +848   m_mapAppIdToCApp
+    //   +1744  m_vecAppOverviewChanged
+    constexpr size_t kControllerInTopManager     = 0xAB8;
+    constexpr size_t kSubscriberVecOffset        = 1744;
+    constexpr size_t kSubscriberVecSizeOffset    = 1760;
+
+    // CAppOverview_Change layout — verified against its constructor.
+    //   +16   has_bits (u32)
+    //   +48   RepeatedField<u32> removed_appid: current_size, total_size, elements
+    //   +65   update_complete (bool)
+    constexpr size_t kProtoSize                  = 128;
+    constexpr size_t kProtoHasBitsOffset         = 16;
+    constexpr size_t kProtoRemovedAppidOffset    = 48;
+    constexpr size_t kProtoUpdateCompleteOffset  = 65;
+
+    constexpr size_t kArgsSize                   = 64;
+    constexpr size_t kSubscriberInvokeVtableSlot = 4;
+
+    // Cleared so BuildCompleteAppOverviewChange's filter (BIsOwned via
+    // vtable[22]) also excludes the app on the next full snapshot.
+    constexpr size_t kCSteamAppOwnedFlagOffset   = 28;
 
     HOOK_FUNC(LoadModuleWithPath, HMODULE, const char* path, bool flags) {
         LOG_INFO("LoadModuleWithPath called with path: {} , flags: {}", path, flags);
-        // wait for hooks to be installed 
+        // wait for hooks to be installed
         for (int i = 0; i < MAX_RETRY && !g_HooksInstalled.load(); ++i){
             LOG_DEBUG("LoadModuleWithPath: waiting for hooks to be installed... (attempt {}/{},interval: {})", i + 1, MAX_RETRY, RETRY_INTERVAL.count());
             std::this_thread::sleep_for(RETRY_INTERVAL);
@@ -20,18 +58,129 @@ namespace {
             h = diversion_hMdoule;
         return h;
     }
-}
 
-namespace SteamUI {
-    void CoreHook() {
-        HOOK_BEGIN();
-        INSTALL_HOOK(GetModuleHandleA("steamui.dll"), LoadModuleWithPath);
-        HOOK_END();
+    // The TopManagerCall anchor matches inside MarkAppChange's body.  Decode
+    // the rel32 at +10 to find the 2-instruction getter `mov rax, [rip+disp]; ret`.
+    GetTopManager_t DecodeTopManagerGetter(uint8_t* anchor) {
+        if (!anchor) return nullptr;
+        int32_t rel32 = *reinterpret_cast<const int32_t*>(anchor + 10);
+        uint8_t* getter = anchor + 14 + rel32;
+        if (getter[0] != 0x48 || getter[1] != 0x8B || getter[2] != 0x05 || getter[7] != 0xC3)
+            return nullptr;
+        return reinterpret_cast<GetTopManager_t>(getter);
     }
 
-    void CoreUnhook() {
+    // Fetch the CSteamUIAppController via the captured getter.  Returns null
+    // if the singleton chain isn't ready yet.
+    void* ResolveController() {
+        if (!oGetTopManager) return nullptr;
+        void* topMgr = oGetTopManager();
+        if (!topMgr) return nullptr;
+        return *reinterpret_cast<void**>(static_cast<uint8_t*>(topMgr) + kControllerInTopManager);
+    }
+
+    // Synthesize a CAppOverview_Change proto with removed_appid=[appId] and
+    // dispatch to every registered webhelper subscriber.  Leaves the host-side
+    // CSteamApp alive so async holders' cached pointers stay valid.
+    bool EmitRemovedAppId(void* pController, AppId_t appId) {
+        alignas(8) uint8_t protoBuf[kProtoSize] = {};
+        alignas(8) uint8_t argsBuf[kArgsSize] = {};
+
+        oAppOverviewChangeCtor(protoBuf, nullptr);
+
+        // RepeatedField backing is consumed synchronously by AddProtobufAsBinary,
+        // so a stack uint32 is sufficient.  The storage pointer gets cleared
+        // again before this frame returns.
+        uint32_t appIdStorage = appId;
+        *reinterpret_cast<uint32_t*>(protoBuf + kProtoRemovedAppidOffset + 0) = 1;
+        *reinterpret_cast<uint32_t*>(protoBuf + kProtoRemovedAppidOffset + 4) = 1;
+        *reinterpret_cast<uint32_t**>(protoBuf + kProtoRemovedAppidOffset + 8) = &appIdStorage;
+
+        *reinterpret_cast<uint32_t*>(protoBuf + kProtoHasBitsOffset) |= 2u;
+        protoBuf[kProtoUpdateCompleteOffset] = 1;
+
+        oAddProtobufAsBinary(argsBuf, protoBuf);
+
+        void** vecData = *reinterpret_cast<void***>(
+            static_cast<uint8_t*>(pController) + kSubscriberVecOffset);
+        uint32_t subCount = *reinterpret_cast<uint32_t*>(
+            static_cast<uint8_t*>(pController) + kSubscriberVecSizeOffset);
+
+        if (!vecData || subCount == 0) {
+            LOG_STEAMUI_WARN("EmitRemovedAppId: no subscribers; appId={}", appId);
+            return false;
+        }
+
+        for (uint32_t i = 0; i < subCount; ++i) {
+            void* subscriber = vecData[i];
+            if (!subscriber) continue;
+            void** vtable = *reinterpret_cast<void***>(subscriber);
+            auto invoke = reinterpret_cast<void(__fastcall*)(void*, void*)>(
+                vtable[kSubscriberInvokeVtableSlot]);
+            invoke(subscriber, argsBuf);
+        }
+
+        *reinterpret_cast<uint64_t*>(protoBuf + kProtoRemovedAppidOffset + 0) = 0;
+        *reinterpret_cast<uint64_t*>(protoBuf + kProtoRemovedAppidOffset + 8) = 0;
+        return true;
+    }
+}
+
+namespace Hooks_SteamUI {
+    void Install() {
+        HMODULE hSteamUI = GetModuleHandleA("steamui.dll");
+        if (!hSteamUI) {
+            LOG_STEAMUI_WARN("steamui.dll not loaded; SteamUI hooks disabled");
+            return;
+        }
+
+        HOOK_BEGIN();
+        INSTALL_HOOK(hSteamUI, LoadModuleWithPath);
+        HOOK_END();
+
+        RESOLVE(hSteamUI, GetAppByID);
+        RESOLVE(hSteamUI, AddProtobufAsBinary);
+        RESOLVE(hSteamUI, AppOverviewChangeCtor);
+
+        auto* anchor = static_cast<uint8_t*>(FIND_SIG(hSteamUI, TopManagerCall));
+        oGetTopManager = DecodeTopManagerGetter(anchor);
+
+        LOG_STEAMUI_INFO("Install: GetAppByID={}, AppOverviewChangeCtor={}, AddProtobufAsBinary={}, GetTopManager={}",
+                         reinterpret_cast<void*>(oGetAppByID),
+                         reinterpret_cast<void*>(oAppOverviewChangeCtor),
+                         reinterpret_cast<void*>(oAddProtobufAsBinary),
+                         reinterpret_cast<void*>(oGetTopManager));
+    }
+
+    void Uninstall() {
         UNHOOK_BEGIN();
         UNINSTALL_HOOK(LoadModuleWithPath);
         UNHOOK_END();
+
+        oAddProtobufAsBinary = nullptr;
+        oAppOverviewChangeCtor = nullptr;
+        oGetAppByID = nullptr;
+        oGetTopManager = nullptr;
+    }
+
+    void RemoveAppOverview(AppId_t appId) {
+        if (!oAppOverviewChangeCtor || !oAddProtobufAsBinary || !oGetTopManager || !oGetAppByID) {
+            LOG_STEAMUI_WARN("RemoveAppOverview: primitives unresolved; appId={}", appId);
+            return;
+        }
+
+        void* pController = ResolveController();
+        if (!pController) {
+            LOG_STEAMUI_WARN("RemoveAppOverview: controller singleton not initialized; appId={}", appId);
+            return;
+        }
+
+        if (void* pApp = oGetAppByID(pController, appId, /*create=*/false)) {
+            *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(pApp) + kCSteamAppOwnedFlagOffset) &= ~1u;
+        }
+
+        if (!EmitRemovedAppId(pController, appId)) return;
+
+        LOG_STEAMUI_INFO("RemoveAppOverview: appId={} done", appId);
     }
 }

@@ -6,7 +6,14 @@
 #include "Hooks_Misc.h"
 #include "Hooks_NetPacket.h"
 #include "Hooks_Package.h"
+#include "Hooks_SteamUI.h"
 
+
+namespace SteamUI {
+
+    void CoreHook()   { Hooks_SteamUI::Install(); }
+    void CoreUnhook() { Hooks_SteamUI::Uninstall(); }
+}
 
 namespace SteamClient {
 

@@ -1,5 +1,6 @@
 #include "Hooks_Misc.h"
 #include "HookMacros.h"
+#include "Hooks_SteamUI.h"
 #include "Utils/VehCommon.h"
 #include "dllmain.h"
 
@@ -284,5 +285,12 @@ namespace Hooks_Misc {
         oMarkLicenseAsChanged(g_pCUser, 0, true);
         oProcessPendingLicenseUpdates(g_pCUser);
         LOG_PACKAGE_INFO("NotifyLicenseChanged: {} added, {} removed", additions.size(), removedCount);
+
+        // CSteamUIAppController caches its own AppOverview entries and doesn't
+        // re-query subscription state on package mutation; remove them
+        // explicitly so the library UI reflects the dropped license.
+        for (AppId_t id : removals) {
+            Hooks_SteamUI::RemoveAppOverview(id);
+        }
     }
 }
