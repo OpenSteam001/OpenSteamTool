@@ -2,6 +2,7 @@
 #include "HookManager.h"
 #include "HookMacros.h"
 #include "dllmain.h"
+#include "steam_messages.pb.h"
 #include <thread>
 #include <chrono>
 
@@ -12,15 +13,13 @@ namespace {
 
     // ── function type aliases (alphabetical) ─────────────────────────────────
     using AddProtobufAsBinary_t   = void*(__fastcall*)(void* /*args*/, void* /*proto*/);
-    using AppOverviewChangeCtor_t = void*(__fastcall*)(void* /*proto*/, void* /*arena*/);
     using GetAppByID_t            = void*(__fastcall*)(void* /*controller*/, AppId_t, bool /*create*/);
     using GetTopManager_t         = void*(__fastcall*)();
 
     // ── resolved function pointers ───────────────────────────────────────────
-    AddProtobufAsBinary_t   oAddProtobufAsBinary   = nullptr;
-    AppOverviewChangeCtor_t oAppOverviewChangeCtor = nullptr;
-    GetAppByID_t            oGetAppByID            = nullptr;
-    GetTopManager_t         oGetTopManager         = nullptr;
+    AddProtobufAsBinary_t   oAddProtobufAsBinary = nullptr;
+    GetAppByID_t            oGetAppByID          = nullptr;
+    GetTopManager_t         oGetTopManager       = nullptr;
 
     // CSteamUIAppController offsets (see its Validate() method):
     //   +0xAB8 from top-manager -> CSteamUIAppController*
@@ -29,15 +28,6 @@ namespace {
     constexpr size_t kControllerInTopManager     = 0xAB8;
     constexpr size_t kSubscriberVecOffset        = 1744;
     constexpr size_t kSubscriberVecSizeOffset    = 1760;
-
-    // CAppOverview_Change layout — verified against its constructor.
-    //   +16   has_bits (u32)
-    //   +48   RepeatedField<u32> removed_appid: current_size, total_size, elements
-    //   +65   update_complete (bool)
-    constexpr size_t kProtoSize                  = 128;
-    constexpr size_t kProtoHasBitsOffset         = 16;
-    constexpr size_t kProtoRemovedAppidOffset    = 48;
-    constexpr size_t kProtoUpdateCompleteOffset  = 65;
 
     constexpr size_t kArgsSize                   = 64;
     constexpr size_t kSubscriberInvokeVtableSlot = 4;
@@ -83,23 +73,12 @@ namespace {
     // dispatch to every registered webhelper subscriber.  Leaves the host-side
     // CSteamApp alive so async holders' cached pointers stay valid.
     bool EmitRemovedAppId(void* pController, AppId_t appId) {
-        alignas(8) uint8_t protoBuf[kProtoSize] = {};
         alignas(8) uint8_t argsBuf[kArgsSize] = {};
 
-        oAppOverviewChangeCtor(protoBuf, nullptr);
-
-        // RepeatedField backing is consumed synchronously by AddProtobufAsBinary,
-        // so a stack uint32 is sufficient.  The storage pointer gets cleared
-        // again before this frame returns.
-        uint32_t appIdStorage = appId;
-        *reinterpret_cast<uint32_t*>(protoBuf + kProtoRemovedAppidOffset + 0) = 1;
-        *reinterpret_cast<uint32_t*>(protoBuf + kProtoRemovedAppidOffset + 4) = 1;
-        *reinterpret_cast<uint32_t**>(protoBuf + kProtoRemovedAppidOffset + 8) = &appIdStorage;
-
-        *reinterpret_cast<uint32_t*>(protoBuf + kProtoHasBitsOffset) |= 2u;
-        protoBuf[kProtoUpdateCompleteOffset] = 1;
-
-        oAddProtobufAsBinary(argsBuf, protoBuf);
+        ::CAppOverview_Change msg;
+        msg.add_removed_appid(appId);
+        msg.set_update_complete(true);
+        oAddProtobufAsBinary(argsBuf, &msg);
 
         void** vecData = *reinterpret_cast<void***>(
             static_cast<uint8_t*>(pController) + kSubscriberVecOffset);
@@ -120,8 +99,6 @@ namespace {
             invoke(subscriber, argsBuf);
         }
 
-        *reinterpret_cast<uint64_t*>(protoBuf + kProtoRemovedAppidOffset + 0) = 0;
-        *reinterpret_cast<uint64_t*>(protoBuf + kProtoRemovedAppidOffset + 8) = 0;
         return true;
     }
 }
@@ -140,14 +117,12 @@ namespace Hooks_SteamUI {
 
         RESOLVE(hSteamUI, GetAppByID);
         RESOLVE(hSteamUI, AddProtobufAsBinary);
-        RESOLVE(hSteamUI, AppOverviewChangeCtor);
 
         auto* anchor = static_cast<uint8_t*>(FIND_SIG(hSteamUI, TopManagerCall));
         oGetTopManager = DecodeTopManagerGetter(anchor);
 
-        LOG_STEAMUI_INFO("Install: GetAppByID={}, AppOverviewChangeCtor={}, AddProtobufAsBinary={}, GetTopManager={}",
+        LOG_STEAMUI_INFO("Install: GetAppByID={}, AddProtobufAsBinary={}, GetTopManager={}",
                          reinterpret_cast<void*>(oGetAppByID),
-                         reinterpret_cast<void*>(oAppOverviewChangeCtor),
                          reinterpret_cast<void*>(oAddProtobufAsBinary),
                          reinterpret_cast<void*>(oGetTopManager));
     }
@@ -158,13 +133,12 @@ namespace Hooks_SteamUI {
         UNHOOK_END();
 
         oAddProtobufAsBinary = nullptr;
-        oAppOverviewChangeCtor = nullptr;
         oGetAppByID = nullptr;
         oGetTopManager = nullptr;
     }
 
     void RemoveAppOverview(AppId_t appId) {
-        if (!oAppOverviewChangeCtor || !oAddProtobufAsBinary || !oGetTopManager || !oGetAppByID) {
+        if (!oAddProtobufAsBinary || !oGetTopManager || !oGetAppByID) {
             LOG_STEAMUI_WARN("RemoveAppOverview: primitives unresolved; appId={}", appId);
             return;
         }

@@ -148,11 +148,6 @@ inline const Signature TopManagerCallSigs[] = {
     {"1778281814", "83 FF 07 0F 84 ?? ?? ?? ?? E8 ?? ?? ?? ?? 45 33 C0"},  // stable
 };
 
-inline const Signature AppOverviewChangeCtorSigs[] = {
-    {"1779155395", "40 53 48 83 EC 20 48 89 51 08 48 8D 05 ?? ?? ?? ?? 48 89 01 48 8B D9 33 C0 48 89 41 10 48 89 51 18 48 89 41 20 48 89 41 28 48 83 C1 30 E8"},  // beta
-    {"1778281814", "40 53 48 83 EC 20 48 89 51 08 48 8D 05 ?? ?? ?? ?? 48 89 01 48 8B D9 33 C0 48 89 41 10 48 89 51 18 48 89 41 20 48 89 41 28 48 83 C1 30 E8"},  // stable
-};
-
 inline const Signature AddProtobufAsBinarySigs[] = {
     {"1779155395", "40 53 55 56 57 48 83 EC ?? 48 8B 05 ?? ?? ?? ?? 48 8B F2"},  // beta
     {"1778281814", "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 8B 05 ?? ?? ?? ?? 48 8B F2 48 8B D9 44 8B 00"},  // stable

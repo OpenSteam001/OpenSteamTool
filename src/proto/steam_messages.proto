@@ -320,3 +320,12 @@ message CMsgClientRichPresenceUpload {
 	optional bytes rich_presence_kv = 1;
 	repeated fixed64 steamid_broadcast = 2;
 }
+
+// ============================================================
+// CAppOverview_Change
+// ============================================================
+message CAppOverview_Change {
+	repeated uint32 removed_appid = 2;
+	optional bool full_update = 3;
+	optional bool update_complete = 4;
+}
