@@ -1,4 +1,4 @@
-# Fetches protobuf v3.21.12, builds both libprotobuf (full, Debug) and
+# Fetches protobuf v3.16.0, builds both libprotobuf (full, Debug) and
 # libprotobuf-lite (Release), plus libprotoc + protoc for code generation.
 #
 # Debug  → links libprotobuf      (heavier, DebugString works)
@@ -22,13 +22,16 @@ set(protobuf_BUILD_PROTOC_BINARIES ON CACHE BOOL "" FORCE)
 FetchContent_Declare(
     protobuf
     GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
-    GIT_TAG        v3.21.12
+    GIT_TAG        v3.16.0
     GIT_SHALLOW    TRUE
     GIT_PROGRESS   TRUE
+    SOURCE_SUBDIR  cmake
 )
 
 set(_saved_CMAKE_WARN_DEPRECATED ${CMAKE_WARN_DEPRECATED})
 set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
+# Opt back in to pre-3.5 policies for protobuf 3.16.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 FetchContent_MakeAvailable(protobuf)
 set(CMAKE_WARN_DEPRECATED ${_saved_CMAKE_WARN_DEPRECATED} CACHE BOOL "" FORCE)
 
