@@ -35,6 +35,20 @@ namespace LuaConfig{
     // Case-insensitive function registry: lowercase name → C function
     static std::unordered_map<std::string, lua_CFunction> g_func_registry;
 
+    static bool ParseUInt64Decimal(const char* text, uint64_t* out) {
+        if (!text || !*text || !out) return false;
+        if (!std::all_of(text, text + strlen(text),
+                         [](unsigned char c) { return std::isdigit(c) != 0; })) {
+            return false;
+        }
+        try {
+            *out = std::stoull(text);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
     // ── Lua HTTP helpers ──────────────────────────────────────────
     //   http_get(url [, headers]) → body, status_code
     //     headers: optional table, e.g. {["Accept"]="application/json"}
@@ -188,11 +202,11 @@ namespace LuaConfig{
             if (!lua_isstring(L, 2))
                 return luaL_error(L, "");
             const char* token = lua_tostring(L, 2);
-            // Convert the string token to a uint64_t value.
-            if(!std::all_of(token, token + strlen(token), ::isdigit)) {
+            uint64_t parsedToken = 0;
+            if (!ParseUInt64Decimal(token, &parsedToken)) {
                 return luaL_error(L, "");
             }
-            AccessTokenSet[AppId] = std::stoull(token);
+            AccessTokenSet[AppId] = parsedToken;
         }
 
         return 0;
@@ -241,10 +255,11 @@ namespace LuaConfig{
         uint64_t depotId = (uint64_t)(uint32_t)val;
         const char* gidStr = lua_tostring(L, 2);
 
-        if (!std::all_of(gidStr, gidStr + strlen(gidStr), ::isdigit))
+        uint64_t gid = 0;
+        if (!ParseUInt64Decimal(gidStr, &gid))
             return luaL_error(L, "setManifestid: gid must be all digits");
 
-        ManifestOverrides[depotId] = { std::stoull(gidStr), 0 };
+        ManifestOverrides[depotId] = { gid, 0 };
         return 0;
     }
 
@@ -335,10 +350,11 @@ namespace LuaConfig{
         AppId_t appId = static_cast<uint32_t>(val);
 
         const char* sidStr = lua_tostring(L, 2);
-        if (!std::all_of(sidStr, sidStr + strlen(sidStr), ::isdigit))
+        uint64_t steamId = 0;
+        if (!ParseUInt64Decimal(sidStr, &steamId))
             return luaL_error(L, "setStat: steamId must be all digits");
 
-        StatSteamIdSet[appId] = std::stoull(sidStr);
+        StatSteamIdSet[appId] = steamId;
         return 0;
     }
 
@@ -472,13 +488,14 @@ namespace LuaConfig{
             *outCode = static_cast<uint64_t>(lua_tointeger(g_lua_state, -1));
         } else if (lua_isstring(g_lua_state, -1)) {
             const char* s = lua_tostring(g_lua_state, -1);
-            if (!std::all_of(s, s + strlen(s), ::isdigit)) {
-                LOG_MANIFEST_WARN("fetch_manifest_code({}) returned non-numeric string '{}'",
+            uint64_t parsed = 0;
+            if (!ParseUInt64Decimal(s, &parsed)) {
+                LOG_MANIFEST_WARN("fetch_manifest_code({}) returned invalid numeric string '{}'",
                                  gid, s);
                 lua_pop(g_lua_state, 1);
                 return false;
             }
-            *outCode = std::stoull(s);
+            *outCode = parsed;
         } else {
             LOG_MANIFEST_WARN("fetch_manifest_code({}) unexpected type (expected digit-string)",
                              gid);
@@ -521,13 +538,14 @@ namespace LuaConfig{
             *outCode = static_cast<uint64_t>(lua_tointeger(g_lua_state, -1));
         } else if (lua_isstring(g_lua_state, -1)) {
             const char* s = lua_tostring(g_lua_state, -1);
-            if (!std::all_of(s, s + strlen(s), ::isdigit)) {
-                LOG_MANIFEST_WARN("fetch_manifest_code_ex({}, {}, {}) returned non-numeric string '{}'",
+            uint64_t parsed = 0;
+            if (!ParseUInt64Decimal(s, &parsed)) {
+                LOG_MANIFEST_WARN("fetch_manifest_code_ex({}, {}, {}) returned invalid numeric string '{}'",
                                  app_id, depot_id, gid, s);
                 lua_pop(g_lua_state, 1);
                 return false;
             }
-            *outCode = std::stoull(s);
+            *outCode = parsed;
         } else {
             LOG_MANIFEST_WARN("fetch_manifest_code_ex({}, {}, {}) unexpected type (expected digit-string)",
                              app_id, depot_id, gid);
