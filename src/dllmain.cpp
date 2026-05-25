@@ -85,9 +85,17 @@ static DWORD WINAPI InitThread(LPVOID param) {
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)
 {
+    (void)pvReserved;
+
     if (dwReason == DLL_PROCESS_ATTACH)
     {
         DisableThreadLibraryCalls(hModule);
+        // Keep this module pinned so explicit FreeLibrary cannot unload code
+        // while hooks/worker threads may still execute inside this DLL.
+        HMODULE pinnedModule = nullptr;
+        GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+            reinterpret_cast<LPCSTR>(&DllMain), &pinnedModule);
         // Hand off all real work to a worker thread to avoid running file I/O,
         // LoadLibrary, and detour transactions under the loader lock.
         HANDLE h = CreateThread(nullptr, 0, InitThread, hModule, 0, nullptr);
@@ -95,9 +103,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)
     }
     else if (dwReason == DLL_PROCESS_DETACH)
     {
-        FileWatcher::Stop();
-        SteamUI::CoreUnhook();
-        SteamClient::CoreUnhook();
+        // No blocking work here: DllMain runs under loader lock.
+        // File watcher and hook resources are process-lifetime.
     }
 
     return TRUE;
