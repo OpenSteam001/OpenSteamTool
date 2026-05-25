@@ -107,6 +107,11 @@ namespace FileWatcher {
 
     static void WatcherThread() {
         const size_t numDirs = g_watchDirs.size();
+        if (numDirs == 0) {
+            LOG_PACKAGE_WARN("No directories configured for watcher");
+            return;
+        }
+
         std::vector<HANDLE> dirHandles(numDirs, nullptr);
         std::vector<OVERLAPPED> overlapped(numDirs);
         std::vector<HANDLE> events(numDirs, nullptr);
@@ -199,11 +204,23 @@ namespace FileWatcher {
     }
 
     void Start(const std::vector<std::string>& directories) {
+        if (directories.empty()) {
+            LOG_PACKAGE_WARN("No directories configured for watcher start");
+            return;
+        }
+
+        std::vector<std::string> effectiveDirs = directories;
+        if (effectiveDirs.size() > MAXIMUM_WAIT_OBJECTS) {
+            LOG_PACKAGE_WARN("Too many watch directories: {} (max supported by WaitForMultipleObjects: {})",
+                             effectiveDirs.size(), MAXIMUM_WAIT_OBJECTS);
+            effectiveDirs.resize(MAXIMUM_WAIT_OBJECTS);
+        }
+
         if (g_running.exchange(true)) {
             LOG_PACKAGE_WARN("Already running");
             return;
         }
-        g_watchDirs = directories;
+        g_watchDirs = effectiveDirs;
         g_watcherThread = std::thread(WatcherThread);
     }
 
