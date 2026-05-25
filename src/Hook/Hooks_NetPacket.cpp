@@ -7,6 +7,7 @@
 #include "Utils/Hash.h"
 #include <chrono>
 #include <future>
+#include <mutex>
 #include <unordered_map>
 
 #include "steam_messages.pb.h"
@@ -206,6 +207,7 @@ namespace Hooks_NetPacket_UserStats {
 
     // jobid_source -> appid mapping (eMsg 151 request -> eMsg 147 response)
     std::unordered_map<uint64, AppId_t> g_JobIdToAppId;
+    std::mutex g_JobIdToAppIdMutex;
 
     // ── Send: CPlayer_GetUserStats_Request (eMsg 151) ──────────
     bool HandleSend_GetUserStats(const uint8* pBody, uint32 cbBody,
@@ -240,7 +242,10 @@ namespace Hooks_NetPacket_UserStats {
         CMsgProtoBufHeader hdr;
         if (hdr.ParseFromArray(pHdr, cbHdr) && hdr.has_jobid_source()) {
             uint64 jobId = hdr.jobid_source();
-            g_JobIdToAppId[jobId] = appId;
+            {
+                std::lock_guard<std::mutex> lock(g_JobIdToAppIdMutex);
+                g_JobIdToAppId[jobId] = appId;
+            }
             LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats request: stored jobid={} -> appid={}", jobId, appId);
         }
 
@@ -275,12 +280,17 @@ namespace Hooks_NetPacket_UserStats {
         bool hasAppId = false;
         if (hdrMsg.has_jobid_target()) {
             uint64 jobId = hdrMsg.jobid_target();
-            auto it = g_JobIdToAppId.find(jobId);
-            if (it != g_JobIdToAppId.end()) {
-                appId = it->second;
-                hasAppId = true;
+            {
+                std::lock_guard<std::mutex> lock(g_JobIdToAppIdMutex);
+                auto it = g_JobIdToAppId.find(jobId);
+                if (it != g_JobIdToAppId.end()) {
+                    appId = it->second;
+                    hasAppId = true;
+                    g_JobIdToAppId.erase(it);
+                }
+            }
+            if (hasAppId) {
                 LOG_ACHIEVEMENT_DEBUG("Player::GetUserStats response: matched jobid={} -> appid={}", jobId, appId);
-                g_JobIdToAppId.erase(it);
             }
         }
 
