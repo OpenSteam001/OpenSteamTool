@@ -44,11 +44,11 @@ namespace {
 namespace Hooks_KeyValues {
 
     void Install() {
-        RESOLVE_EX_D(FindOrCreateKey, KeyValues_FindOrCreateKeySigs);
+        RESOLVE_D(FindOrCreateKey);
         if (!oFindOrCreateKey) return;
 
         HOOK_BEGIN();
-        INSTALL_HOOK_EX_D(ReadAsBinary, KeyValues_ReadAsBinarySigs);
+        INSTALL_HOOK_D(ReadAsBinary);
         HOOK_END();
     }
 

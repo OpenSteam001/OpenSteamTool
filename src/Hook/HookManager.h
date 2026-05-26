@@ -2,7 +2,6 @@
 #define HOOKMANAGER_H
 
 #include "dllmain.h"
-#include "Patterns.h"
 
 namespace SteamUI {
     void CoreHook();

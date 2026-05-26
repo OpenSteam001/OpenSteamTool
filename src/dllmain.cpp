@@ -1,6 +1,7 @@
 #include "dllmain.h"
 #include "Hook/HookManager.h"
 #include "Utils/FileWatcher.h"
+#include "Utils/PatternLoader.h"
 
 // Load diversion.dll and prepare key runtime paths.
 bool LoadDiversion()
@@ -9,6 +10,7 @@ bool LoadDiversion()
         return false;
     }
     sprintf_s(SteamclientPath, MAX_PATH, "%s\\steamclient64.dll",  SteamInstallPath);
+    sprintf_s(SteamUIPath,     MAX_PATH, "%s\\steamui.dll",        SteamInstallPath);
     sprintf_s(DiversionPath,   MAX_PATH, "%s\\bin\\diversion.dll", SteamInstallPath);
     sprintf_s(LuaDir,          MAX_PATH, "%s\\config\\lua",        SteamInstallPath);
     sprintf_s(ConfigPath,      MAX_PATH, "%s\\opensteamtool.toml", SteamInstallPath);
@@ -30,27 +32,6 @@ bool LoadDiversion()
     return true;
 }
 
-// Resolve the current Steam build id from steam.exe!GetBootstrapperVersion
-// once at startup. ByteSearch uses this string as the preferred-match
-// label so it picks the Sigs[] entry built for the running build before
-// falling back to try-all order (see Utils/ByteSearch.cpp).
-static void DetectSteamBuildId() {
-    using GetBootstrapperVersion_t = int64_t (*)();
-    HMODULE hSteam = GetModuleHandleA("steam.exe");
-    if (!hSteam) {
-        LOG_WARN("SteamVersion: steam.exe module not loaded; build id unavailable");
-        return;
-    }
-    auto fn = reinterpret_cast<GetBootstrapperVersion_t>(
-        GetProcAddress(hSteam, "GetBootstrapperVersion"));
-    if (!fn) {
-        LOG_WARN("SteamVersion: steam.exe!GetBootstrapperVersion not exported");
-        return;
-    }
-    g_steamBuildId = std::to_string(fn());
-    LOG_INFO("SteamVersion: build id = {}", g_steamBuildId);
-}
-
 // All initialisation that touches the filesystem, calls LoadLibrary, scans
 // memory, or installs detours runs here on a worker thread — we MUST NOT do
 // any of that from inside DllMain (loader lock).
@@ -59,8 +40,6 @@ static DWORD WINAPI InitThread(LPVOID param) {
     Log::Init(selfModule);
     LOG_INFO("OpenSteamTool init thread started");
 
-    DetectSteamBuildId();
-
     if (!LoadDiversion()) {
         LOG_ERROR("LoadDiversion failed");
         return 1;
@@ -68,6 +47,14 @@ static DWORD WINAPI InitThread(LPVOID param) {
 
     Config::Load(ConfigPath);
     Log::InitModules();
+
+    // Load pattern files for steamclient64.dll and steamui.dll.
+    // Each call computes the SHA-256 of the DLL on disk, checks the local
+    // cache, and downloads from GitHub if needed.  Both calls are synchronous
+    // but run on this worker thread, never under the loader lock.
+    HMODULE hSteamUI = GetModuleHandleA("steamui.dll");
+    PatternLoader::Load(hSteamUI, SteamUIPath, "steamui");
+    PatternLoader::Load(diversion_hMdoule, SteamclientPath, "steamclient");
 
     std::vector<std::string> watchDirs = Config::luaPaths;
     watchDirs.push_back(std::string(LuaDir));
@@ -78,6 +65,10 @@ static DWORD WINAPI InitThread(LPVOID param) {
 
     SteamUI::CoreHook();
     SteamClient::CoreHook();
+
+    // Surface any functions that FindPattern() could not locate.
+    PatternLoader::ReportMissingFunctions();
+
     g_HooksInstalled.store(true);
     LOG_INFO("OpenSteamTool init complete");
     return 0;

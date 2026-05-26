@@ -49,17 +49,6 @@ namespace {
         return h;
     }
 
-    // The TopManagerCall anchor matches inside MarkAppChange's body.  Decode
-    // the rel32 at +10 to find the 2-instruction getter `mov rax, [rip+disp]; ret`.
-    GetTopManager_t DecodeTopManagerGetter(uint8_t* anchor) {
-        if (!anchor) return nullptr;
-        int32_t rel32 = *reinterpret_cast<const int32_t*>(anchor + 10);
-        uint8_t* getter = anchor + 14 + rel32;
-        if (getter[0] != 0x48 || getter[1] != 0x8B || getter[2] != 0x05 || getter[7] != 0xC3)
-            return nullptr;
-        return reinterpret_cast<GetTopManager_t>(getter);
-    }
-
     // Fetch the CSteamUIAppController via the captured getter.  Returns null
     // if the singleton chain isn't ready yet.
     void* ResolveController() {
@@ -117,9 +106,7 @@ namespace Hooks_SteamUI {
 
         RESOLVE(hSteamUI, GetAppByID);
         RESOLVE(hSteamUI, AddProtobufAsBinary);
-
-        auto* anchor = static_cast<uint8_t*>(FIND_SIG(hSteamUI, TopManagerCall));
-        oGetTopManager = DecodeTopManagerGetter(anchor);
+        RESOLVE(hSteamUI, GetTopManager);
 
         LOG_STEAMUI_INFO("Install: GetAppByID={}, AddProtobufAsBinary={}, GetTopManager={}",
                          reinterpret_cast<void*>(oGetAppByID),
