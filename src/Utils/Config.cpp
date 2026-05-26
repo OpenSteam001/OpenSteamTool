@@ -55,7 +55,18 @@ namespace Config {
                 }
             }
 
-            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={}",
+            // [pattern]
+            if (auto pattern = tbl["pattern"].as_table()) {
+                if (auto val = (*pattern)["mirror"].value<std::string>()) {
+                    patternMirror = *val;
+                    // Strip a trailing slash so PatternLoader can append
+                    // "/<subdir>/<sha>.toml" without producing "//".
+                    while (!patternMirror.empty() && patternMirror.back() == '/')
+                        patternMirror.pop_back();
+                }
+            }
+
+            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={} pattern.mirror={}",
                      manifestUrl == ManifestUrl::Wudrm ? "wudrm" : "steamrun",
                      [&](){
                          switch (logLevel) {
@@ -67,7 +78,8 @@ namespace Config {
                          default: return "???";
                          }
                      }(),
-                     (uint32_t)luaPaths.size());
+                     (uint32_t)luaPaths.size(),
+                     patternMirror.empty() ? "<default>" : patternMirror);
 
         } catch (const toml::parse_error& e) {
             LOG_WARN("Config parse error: {}", e.what());

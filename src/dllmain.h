@@ -27,15 +27,10 @@ inline HMODULE diversion_hMdoule = nullptr;
 inline std::atomic<bool> g_HooksInstalled{false};
 inline char SteamInstallPath[MAX_PATH] = {};
 inline char SteamclientPath[MAX_PATH] = {};
-inline char DiversionPath[MAX_PATH] = {};
-inline char LuaDir[MAX_PATH] = {};
-inline char ConfigPath[MAX_PATH] = {};
-
-// Current Steam build id (digit string returned by
-// steam.exe!GetBootstrapperVersion). Populated by InitThread; empty
-// until then. Read by ByteSearch to prefer the matching label in each
-// Sigs[] array — see Utils/ByteSearch.cpp.
-inline std::string g_steamBuildId;
+inline char SteamUIPath[MAX_PATH]      = {};
+inline char DiversionPath[MAX_PATH]    = {};
+inline char LuaDir[MAX_PATH]           = {};
+inline char ConfigPath[MAX_PATH]       = {};
 
 // The fake AppId used by -onlinefix (SpaceWar).
 constexpr AppId_t kOnlineFixAppId = 480;

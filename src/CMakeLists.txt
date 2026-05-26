@@ -77,6 +77,7 @@ add_library(OpenSteamTool SHARED
     # Shared utilities
     Utils/AppTicket.cpp
     Utils/ByteSearch.cpp
+    Utils/PatternLoader.cpp
     Utils/Log.cpp
     Utils/Config.cpp
     Utils/LuaConfig.cpp
@@ -114,6 +115,7 @@ target_link_libraries(OpenSteamTool PRIVATE
     lua_static
     detours
     winhttp
+    Bcrypt
     $<$<CONFIG:Debug>:libprotobuf>
     $<$<CONFIG:Release>:libprotobuf-lite>
     tomlplusplus::tomlplusplus
