@@ -49,9 +49,9 @@ namespace {
         // To add a new callback: add an else-if branch here.
         if (iCallback == AppLicensesChanged_t::k_iCallback) {
             auto* p = static_cast<AppLicensesChanged_t*>(pCallbackData);
-            LOG_PACKAGE_DEBUG("SendCallbackToPipe: AppLicensesChanged m_bReloadAll={} -> true",
+            LOG_PACKAGE_DEBUG("SendCallbackToPipe: AppLicensesChanged m_bReloadAll={}",
                            p->m_bReloadAll);
-            p->m_bReloadAll = true;
+            // p->m_bReloadAll = true; we don't need it anymore
         }
 
         return oSendCallbackToPipe(pSteamEngine, hSteamPipe, iClientUser,

@@ -28,4 +28,11 @@ namespace Config {
     // [lua]
     inline std::vector<std::string> luaPaths;
 
+    // [pattern]
+    // Base URL for the per-DLL pattern TOML files. Final URL =
+    //   <patternMirror>/<ghSubdir>/<sha256>.toml
+    // Empty → built-in default (raw.githubusercontent.com). Users in regions
+    // where the default is blocked or slow can point this at a mirror.
+    inline std::string patternMirror;
+
 }

@@ -10,7 +10,6 @@
 #include <windows.h>
 #include <detours.h>
 #include "Utils/ByteSearch.h"
-#include "Patterns.h"
 
 // ── transaction helpers ─────────────────────────────────────────
 #define HOOK_BEGIN()                          \
@@ -59,29 +58,12 @@
 
 #define INSTALL_HOOK_D(name)            INSTALL_HOOK(diversion_hMdoule, name)
 
-#define INSTALL_HOOK_EX(module, name, sigs)                           \
-    do {                                                              \
-        void* _p_ = ByteSearch(module, #name, sigs, std::size(sigs));  \
-        if (_p_) {                                                    \
-            o##name = (name##_t)_p_;                                  \
-            DetourAttach(reinterpret_cast<PVOID*>(&o##name),           \
-                         reinterpret_cast<PVOID>(hk##name));           \
-        }                                                             \
-    } while (0)
-
-#define INSTALL_HOOK_EX_D(name, sigs)     INSTALL_HOOK_EX(diversion_hMdoule, name, sigs)
-
 // ── resolve ─────────────────────────────────────────────────────
 // Find signature → cast to name##_t → assign to o##name.  No Detours.
 #define RESOLVE(module, name) \
     o##name = reinterpret_cast<name##_t>(FIND_SIG(module, name))
 
 #define RESOLVE_D(name)       RESOLVE(diversion_hMdoule, name)
-
-#define RESOLVE_EX(module, name, sigs) \
-    o##name = reinterpret_cast<name##_t>(ByteSearch(module, #name, sigs, std::size(sigs)))
-
-#define RESOLVE_EX_D(name, sigs)  RESOLVE_EX(diversion_hMdoule, name, sigs)
 
 // ── uninstall ───────────────────────────────────────────────────
 // Call between UNHOOK_BEGIN / UNHOOK_END.

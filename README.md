@@ -95,6 +95,11 @@ timeout_recv_ms    = 10000
 # The default folder is always loaded last so user files take priority.
 [lua]
 paths = []
+
+# Optional signature-file mirror. See "Steam version compatibility" below.
+# Leave commented out for the built-in default (raw.githubusercontent.com).
+[pattern]
+# mirror = "https://cdn.jsdelivr.net/gh/OpenSteam001/steam-monitor@pattern"
 ```
 
 ### Manifest via Lua
@@ -117,6 +122,59 @@ The C++ runtime provides two Lua helpers:
 | `http_post` | `http_post(url, body [, headers])` | `body, status_code` |
 
 `headers` is an optional table: `{["Key"]="Value", ...}`.
+
+### Steam version compatibility
+
+OpenSteamTool no longer ships byte-pattern signatures inside the DLL. Instead, on each launch it computes the SHA-256 of `steamclient64.dll` and `steamui.dll` on disk and looks up a matching pattern file from the upstream tracker at [`OpenSteam001/steam-monitor`](https://github.com/OpenSteam001/steam-monitor) (`pattern` branch).
+
+Lookup order (every launch):
+
+1. **GitHub raw** — `https://raw.githubusercontent.com/OpenSteam001/steam-monitor/pattern/...`. Canonical source.
+2. **jsDelivr CDN** — automatic fallback if GitHub raw is unreachable (connection refused / timeout / 5xx). No configuration required. Useful in regions where `raw.githubusercontent.com` is blocked but jsDelivr is reachable (e.g. mainland China).
+3. **Local cache** — `<Steam>\opensteamtool\pattern\<subdir>\<sha256>.toml`. Used **only** when remote is unreachable. The cache is overwritten after every successful remote fetch.
+
+Remote is consulted on every launch so users automatically pick up upstream re-publications (e.g. the bot adding a new signature, or fixing an existing one) without having to clear any cache.
+
+If a step returns **HTTP 404** the mirror loop stops immediately — all mirrors serve the same content, so a 404 means the upstream bot has not yet published a TOML for this Steam build. The code then falls back to the local cache if one exists; otherwise a one-shot popup appears with the unmatched DLL name, its SHA-256, the expected cache path, and the upstream URL. Only the hooks tied to that DLL are disabled — the rest of OpenSteamTool keeps working.
+
+You can also drop a pattern TOML into the cache directory manually if you know the layout for a given build; the file name must be `<sha256>.toml`. The cache fallback will pick it up the next time remote is unreachable.
+
+> A short outbound HTTPS request is performed at every launch (one per DLL: `steamclient64.dll`, `steamui.dll`). The downloaded bodies are tiny (~10 KB each) and the work runs on a worker thread, so it never blocks Steam's loader.
+
+#### Using a different mirror
+
+For most users, the built-in **GitHub → jsDelivr** automatic fallback is enough; you do not need to touch `opensteamtool.toml` at all.
+
+If you want to force a specific source (private mirror, intranet server, or a CDN that's faster on your network than the defaults), set it explicitly in `opensteamtool.toml`. **Setting `mirror` disables the automatic GitHub→jsDelivr fallback** — only the URL you specify is tried, on the principle that an explicit user choice should win.
+
+```toml
+[pattern]
+# Default if unset:
+#   https://raw.githubusercontent.com/OpenSteam001/steam-monitor/pattern
+# Examples:
+mirror = "https://cdn.jsdelivr.net/gh/OpenSteam001/steam-monitor@pattern"
+# mirror = "https://ghproxy.com/https://raw.githubusercontent.com/OpenSteam001/steam-monitor/pattern"
+# mirror = "https://your.server.com/opensteamtool-patterns"
+```
+
+The full URL fetched at runtime is `<mirror>/steamclient/<sha256>.toml` and `<mirror>/steamui/<sha256>.toml`. Any HTTPS server that serves the same directory layout works. A trailing `/` is allowed but optional.
+
+Resolved URL by config (example, for the `steamui` lookup):
+
+| Config | Resulting URL |
+|---|---|
+| `[pattern]` omitted, or `mirror = ""` | `https://raw.githubusercontent.com/OpenSteam001/steam-monitor/pattern/steamui/<sha>.toml` |
+| `mirror = "https://cdn.jsdelivr.net/gh/OpenSteam001/steam-monitor@pattern"` | `https://cdn.jsdelivr.net/gh/OpenSteam001/steam-monitor@pattern/steamui/<sha>.toml` |
+| `mirror = "https://your.server.com/p/"` (trailing slash) | `https://your.server.com/p/steamui/<sha>.toml` (slash stripped at parse) |
+
+**Verifying a mirror in your browser:** paste a complete URL — base + subdir + a real SHA-256 + `.toml`. The base URL alone (without the file path) will return `Invalid URL` from most CDNs, which is expected behavior, not a sign the mirror is broken. Example URLs you can paste directly:
+
+```
+https://cdn.jsdelivr.net/gh/OpenSteam001/steam-monitor@pattern/steamui/7a72275b5efc6781a964f6a8e5414ea2226c4a0a64a82e79b9e7d501dfcc3b57.toml
+https://raw.githubusercontent.com/OpenSteam001/steam-monitor/pattern/steamui/7a72275b5efc6781a964f6a8e5414ea2226c4a0a64a82e79b9e7d501dfcc3b57.toml
+```
+
+Replace the hash with a real one from [the upstream `pattern` branch](https://github.com/OpenSteam001/steam-monitor/tree/pattern/steamui). If the browser returns `200` you're good; `404` means upstream hasn't published a file for that DLL yet (open an issue), and connect/timeout errors mean the mirror itself isn't reachable from your network — pick another.
 
 ### Debug logging
 
@@ -145,6 +203,9 @@ The log level is controlled by `[log] level` in `opensteamtool.toml`.
 - Windows 10/11
 - CMake 3.20+
 - Visual Studio 2022 with MSVC (x64 toolchain)
+
+### Runtime requirements
+- Outbound HTTPS access to `raw.githubusercontent.com` on first launch after a Steam update (see [Steam version compatibility](#steam-version-compatibility)). Cached afterwards.
 
 ### Quick build
 ```powershell
