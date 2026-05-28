@@ -41,9 +41,7 @@ namespace {
     int    g_SendPacketPoolIdx = 0;
 
     // ── EMsg -> name lookup  ─────────────────────────
-    using PchMsgNameFromEMsg_t = char*(*)(EMsg);
-    PchMsgNameFromEMsg_t oPchMsgNameFromEMsg = nullptr;
-
+    RESOLVE_FUNC(PchMsgNameFromEMsg, char*, EMsg eMsg);
     inline const char* MsgName(EMsg eMsg) {
         if (oPchMsgNameFromEMsg) return oPchMsgNameFromEMsg(eMsg);
         return "?";
@@ -1116,10 +1114,10 @@ namespace {
 
 namespace Hooks_NetPacket {
     void Install() {
-        RESOLVE_D(PchMsgNameFromEMsg);
+        RESOLVE_C(PchMsgNameFromEMsg);
         HOOK_BEGIN();
-        INSTALL_HOOK_D(BBuildAndAsyncSendFrame);
-        INSTALL_HOOK_D(RecvPkt);
+        INSTALL_HOOK_C(BBuildAndAsyncSendFrame);
+        INSTALL_HOOK_C(RecvPkt);
         HOOK_END();
     }
 
@@ -1128,6 +1126,5 @@ namespace Hooks_NetPacket {
         UNINSTALL_HOOK(BBuildAndAsyncSendFrame);
         UNINSTALL_HOOK(RecvPkt);
         UNHOOK_END();
-        oPchMsgNameFromEMsg = nullptr;
     }
 }

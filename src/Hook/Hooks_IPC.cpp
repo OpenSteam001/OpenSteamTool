@@ -8,8 +8,7 @@
 
 namespace {
 
-    using GetPipeClient_t = CSteamPipeClient*(*)(void* pEngine, HSteamPipe hSteamPipe);
-    GetPipeClient_t oGetPipeClient = nullptr;
+    RESOLVE_FUNC(GetPipeClient, CSteamPipeClient*, void* pEngine, HSteamPipe hSteamPipe);
 
     static CSteamPipeClient* GetPipe(void* pServer, HSteamPipe hSteamPipe) {
         return oGetPipeClient ? oGetPipeClient(pServer, hSteamPipe) : nullptr;
@@ -36,7 +35,7 @@ namespace {
               void* pServer, HSteamPipe hSteamPipe,
               CUtlBuffer* pRead, CUtlBuffer* pWrite)
     {
-        auto* pipe = GetPipe(pServer, hSteamPipe);
+        CSteamPipeClient* pipe = GetPipe(pServer, hSteamPipe);
 
         // ── Parse header, find handler ──────────────────────────
         const IpcHandlerEntry* entry = nullptr;
@@ -60,14 +59,14 @@ namespace {
                     LOG_IPC_DEBUG("[InterfaceCall] {} {} realAppId={},AppId={}",
                                   entry->name, pipe->DebugString(),
                                   Hooks_Misc::ResolveAppId(),
-                                  Hooks_Misc::GetAppIDForCurrentPipe()
+                                  Hooks_Misc::GetAppIDForCurrentPipeWrap()
                                 );
                 } else {
                     LOG_IPC_TRACE("[InterfaceCall(unhandled)]{}::0x{:08X} {} realAppId={},AppId={}",
                                   EIPCInterfaceName(iface), funcHash,
                                   pipe->DebugString(),
                                   Hooks_Misc::ResolveAppId(),
-                                  Hooks_Misc::GetAppIDForCurrentPipe()
+                                  Hooks_Misc::GetAppIDForCurrentPipeWrap()
                                 );
                 }
             } else {
@@ -101,23 +100,21 @@ namespace Hooks_IPC {
     }
 
     void Install() {
-        RESOLVE_D(GetPipeClient);
+        RESOLVE_C(GetPipeClient);
 
         // Interface modules register their handlers here.
         Hooks_IPC_ISteamUser::Register();
         Hooks_IPC_ISteamUtils::Register();
 
         HOOK_BEGIN();
-        INSTALL_HOOK_D(IPCProcessMessage);
+        INSTALL_HOOK_C(IPCProcessMessage);
         HOOK_END();
     }
 
     void Uninstall() {
         UNHOOK_BEGIN();
-        UNINSTALL_HOOK(IPCProcessMessage);
+        UNINSTALL_HOOK_C(IPCProcessMessage);
         UNHOOK_END();
-        oGetPipeClient = nullptr;
-        g_Handlers.clear();
     }
 
 }

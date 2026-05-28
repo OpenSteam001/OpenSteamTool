@@ -108,7 +108,11 @@ namespace {
 
         const uint32 ticketSize = static_cast<uint32>(ticket.size());
         const int32 totalSize = 1 + 1 + 4 + ticketSize;
-        Hooks_Misc::EnsureBufferSize(pWrite, totalSize);
+        if (!Hooks_Misc::EnsureBufferSize(pWrite, totalSize)) {
+            LOG_IPC_DEBUG("GetEncryptedAppTicket: AppId={} - failed to ensure buffer size", appId);
+            return;
+        }
+        pWrite->m_Put = totalSize;
 
         uint8* base = pWrite->Base();
         base[0] = RESPONSE_PREFIX;

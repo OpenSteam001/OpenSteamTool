@@ -1,7 +1,7 @@
 #include "dllmain.h"
 #include "FileWatcher.h"
 #include "LuaConfig.h"
-#include "Hook/Hooks_Misc.h"
+#include "Hook/Hooks_Package.h"
 #include "Log.h"
 #include <thread>
 #include <atomic>
@@ -49,7 +49,7 @@ namespace FileWatcher {
             }
         }
 
-        Hooks_Misc::NotifyLicenseChanged();
+        Hooks_Package::NotifyLicenseChanged();
         LOG_PACKAGE_INFO("Refresh completed");
     }
 

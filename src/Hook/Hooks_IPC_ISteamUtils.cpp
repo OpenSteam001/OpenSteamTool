@@ -86,7 +86,7 @@ namespace {
         const auto* req = reinterpret_cast<const GetAPICallResultRequest*>(
             pRead->Base() + OFFSET_ARGS);
 
-        AppId_t appId = Hooks_Misc::GetAppIDForCurrentPipe();
+        AppId_t appId = Hooks_Misc::GetAppIDForCurrentPipeWrap();
         LOG_IPC_DEBUG("GetAPICallResult: hAsyncCall=0x{:016X} AppId={} iCallback={} cubCallback={}",
                   req->hSteamAPICall, appId, req->iCallbackExpected, req->cubCallback);
         for (auto& entry : g_GacrDispatch) {

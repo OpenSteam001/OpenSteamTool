@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────────
 // Hook boilerplate elimination macros.
 //
-// Convention: macros ending in _D use diversion_hMdoule as module.
+// Convention: macros ending in _D use client_hModule as module.
 // Standard macros (no _D suffix) take an explicit module argument.
 // ─────────────────────────────────────────────────────────────────
 
@@ -44,26 +44,21 @@
     inline name##_t o##name = nullptr;                      \
     ret __fastcall hk##name(__VA_ARGS__)
 
+    
 // ── install ─────────────────────────────────────────────────────
 // Call between HOOK_BEGIN / HOOK_END.
 #define INSTALL_HOOK(module, name)                                    \
-    do {                                                              \
-        void* _p_ = FIND_SIG(module, name);                            \
-        if (_p_) {                                                    \
-            o##name = (name##_t)_p_;                                  \
-            DetourAttach(reinterpret_cast<PVOID*>(&o##name),           \
-                         reinterpret_cast<PVOID>(hk##name));           \
-        }                                                             \
-    } while (0)
+do {                                                              \
+    void* _p_ = FIND_SIG(module, name);                            \
+    if (_p_) {                                                    \
+        o##name = (name##_t)_p_;                                  \
+        DetourAttach(reinterpret_cast<PVOID*>(&o##name),           \
+        reinterpret_cast<PVOID>(hk##name));           \
+    }                                                             \
+} while (0)
 
-#define INSTALL_HOOK_D(name)            INSTALL_HOOK(diversion_hMdoule, name)
-
-// ── resolve ─────────────────────────────────────────────────────
-// Find signature → cast to name##_t → assign to o##name.  No Detours.
-#define RESOLVE(module, name) \
-    o##name = reinterpret_cast<name##_t>(FIND_SIG(module, name))
-
-#define RESOLVE_D(name)       RESOLVE(diversion_hMdoule, name)
+#define INSTALL_HOOK_C(name)            INSTALL_HOOK(client_hModule, name)
+#define INSTALL_HOOK_U(name)            INSTALL_HOOK(ui_hModule, name)
 
 // ── uninstall ───────────────────────────────────────────────────
 // Call between UNHOOK_BEGIN / UNHOOK_END.
@@ -75,3 +70,29 @@
             o##name = nullptr;                                        \
         }                                                             \
     } while (0)
+#define UNINSTALL_HOOK_C(name)        UNINSTALL_HOOK(name)
+#define UNINSTALL_HOOK_U(name)        UNINSTALL_HOOK(name)
+
+// ── resolve function definition ────────────────────────────────────
+//   RESOLVE_FUNC(CUtlMemoryGrow, void*, CUtlVector<AppId_t>*, int);
+// generates:
+//   using CUtlMemoryGrow_t = void*(__fastcall*)(CUtlVector<AppId_t>*, int);
+//   inline CUtlMemoryGrow_t oCUtlMemoryGrow = nullptr;
+#define RESOLVE_FUNC(name, ret, ...)                       \
+    using name##_t = ret(__fastcall*)(__VA_ARGS__);        \
+    inline name##_t o##name = nullptr
+
+// ── resolve ─────────────────────────────────────────────────────
+// Find signature → cast to name##_t → assign to o##name.
+#define RESOLVE(module, name) \
+do { \
+    void* _p_ = FIND_SIG(module, name); \
+    if (_p_) { \
+        o##name = reinterpret_cast<name##_t>(_p_); \
+    } \
+} while (0)
+
+#define RESOLVE_C(name)       RESOLVE(client_hModule, name)
+#define RESOLVE_U(name)       RESOLVE(ui_hModule, name)
+
+

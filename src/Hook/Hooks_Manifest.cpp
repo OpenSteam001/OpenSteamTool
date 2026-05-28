@@ -230,7 +230,7 @@ namespace Hooks_Manifest {
 
     void Install() {
         HOOK_BEGIN();
-        INSTALL_HOOK_D(BuildDepotDependency);
+        INSTALL_HOOK_C(BuildDepotDependency);
         HOOK_END();
     }
 

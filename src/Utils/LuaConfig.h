@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace LuaConfig{
-    bool HasDepot(AppId_t appId);
+    bool HasDepot(AppId_t appId, bool checkOwned=true);
     void MarkOwned(AppId_t appId);
     std::vector<AppId_t> GetAllDepotIds();
     std::vector<uint8> GetDecryptionKey(AppId_t appId);

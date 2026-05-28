@@ -403,8 +403,8 @@ namespace LuaConfig{
     }
 
     // ── public query API ─────────────────────────────────────────
-    bool HasDepot(AppId_t DepotId) {
-        return DepotKeySet.count(DepotId) && !OwnedAppIdSet.count(DepotId);
+    bool HasDepot(AppId_t DepotId,bool checkOwned) {
+        return DepotKeySet.count(DepotId) && (!checkOwned || !OwnedAppIdSet.count(DepotId));
     }
 
     void MarkOwned(AppId_t AppId) {

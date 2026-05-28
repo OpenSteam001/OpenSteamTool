@@ -30,13 +30,13 @@ namespace {
 namespace Hooks_Decryption {
     void Install() {
         HOOK_BEGIN();
-        INSTALL_HOOK_D(LoadDepotDecryptionKey);
+        INSTALL_HOOK_C(LoadDepotDecryptionKey);
         HOOK_END();
     }
 
     void Uninstall() {
         UNHOOK_BEGIN();
-        UNINSTALL_HOOK(LoadDepotDecryptionKey);
+        UNINSTALL_HOOK_C(LoadDepotDecryptionKey);
         UNHOOK_END();
     }
 }

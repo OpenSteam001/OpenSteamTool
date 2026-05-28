@@ -7,6 +7,7 @@
 #include "Types.h"
 #include "Enums.h"
 
+
 #include <string>
 #include <format>
 
@@ -123,13 +124,6 @@ struct AppOwnership
 			bOwnsLicense, bLicenseExpired, bIsPermanent, bLowViolence, bFreeLicense, bRegionRestricted, bFromFreeWeekend, bLicenseLocked, bLicensePending,
 			bRetailLicense, bAutoGrant, bLicensePermanent, bGuestPass, bBorrowed, bAnySiteLicense, bAllSiteLicenses, bAllActivationRequired, bFamilyShared);
 	}
-};
-
-struct CSteamApp{
-	void** vfptr;
-	int32 StateFlags;
-	AppId_t AppID;
-	// ...
 };
 
 // Single depot manifest entry (0x20 bytes) produced by BuildDepotDependency.
@@ -270,4 +264,85 @@ struct CSteamPipeClient {
 		return std::format("pipe=0x{:08X} pid={} proc={} ",
 			m_hSteamPipe, m_clientPID, m_szProcessName ? m_szProcessName : "?");
 	}
+};
+
+struct CGameID{
+	enum EGameIDType
+	{
+		k_EGameIDTypeApp		= 0,
+		k_EGameIDTypeGameMod	= 1,
+		k_EGameIDTypeShortcut	= 2,
+		k_EGameIDTypeP2P		= 3,
+	};
+	
+	bool IsSteamApp() const
+	{
+		return ( m_gameID.m_nType == k_EGameIDTypeApp );
+	}
+
+	AppId_t AppID(bool checkType = false) const
+	{
+		if(checkType && !IsSteamApp())
+			return 0;
+		return m_gameID.m_nAppID;
+	}
+
+	void SetAppID(AppId_t nAppID)
+	{
+		m_gameID.m_nAppID = nAppID;
+	}
+
+	struct GameID_t
+	{
+		unsigned int m_nAppID : 24;
+		unsigned int m_nType : 8;
+		unsigned int m_nModID : 32;
+	};
+
+	union
+	{
+		uint64 m_ulGameID;
+		GameID_t m_gameID;
+	};
+};
+
+struct CAppData
+{
+	void** fptr;
+	AppId_t nAppID;
+	uint32 ChangeNumber;
+	uint32 LastChangeTimeStamp;
+	bool bSkipFlag;
+	bool bDeniedToken;
+	bool bMissingToken;
+	uint64 accessToken;
+	uint8 sha1Hash[20];
+
+	bool HasEmptyAppInfoSha() const {
+		static constexpr uint8 kEmptySha1[sizeof(sha1Hash)] = {};
+		return memcmp(sha1Hash, kEmptySha1, sizeof(sha1Hash)) == 0;
+	}
+
+	bool IsUnresolvedAppInfo() const {
+		return HasEmptyAppInfoSha() && !bSkipFlag;
+	}
+
+	std::string DebugString() const {
+		return std::format("AppID={} ChangeNumber={} LastChangeTimeStamp={} SkipFlag={} DeniedToken={} MissingToken={} AccessToken={}",
+			nAppID, ChangeNumber, LastChangeTimeStamp, bSkipFlag, bDeniedToken, bMissingToken, accessToken);
+	}
+};
+
+struct CSteamApp
+{
+	void** fptr;
+	CGameID GameID;
+	AppId_t nAppID;
+	uint16 _unknown1;
+	uint16 _unknown2;
+	EAppReleaseState ReleaseState;
+	EAppOwnershipFlags OwnershipFlags;
+	uint32 _unknown3;
+	uint64 SteamID;
+	uint32 PurchasedTime;
 };
