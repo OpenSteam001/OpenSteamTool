@@ -84,6 +84,7 @@ add_library(OpenSteamTool SHARED
     Utils/VehCommon.cpp
     Utils/WinHttp.cpp
     Utils/FileWatcher.cpp
+    Utils/DllDirectory.cpp
 
     # Per-category hook modules
     Hook/HookManager.cpp

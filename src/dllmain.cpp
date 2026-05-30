@@ -2,6 +2,7 @@
 #include "Hook/HookManager.h"
 #include "Utils/FileWatcher.h"
 #include "Utils/PatternLoader.h"
+#include "Utils/DllDirectory.h"
 
 // prepare key runtime paths.
 bool InitializeSteamComponents()
@@ -9,11 +10,12 @@ bool InitializeSteamComponents()
     if (!GetCurrentDirectoryA(MAX_PATH, SteamInstallPath)) {
         return false;
     }
-    sprintf_s(SteamclientPath, MAX_PATH, "%s\\steamclient64.dll",  SteamInstallPath);
-    sprintf_s(SteamUIPath,     MAX_PATH, "%s\\steamui.dll",        SteamInstallPath);
-    sprintf_s(DiversionPath,   MAX_PATH, "%s\\bin\\diversion.dll", SteamInstallPath);
-    sprintf_s(LuaDir,          MAX_PATH, "%s\\config\\lua",        SteamInstallPath);
-    sprintf_s(ConfigPath,      MAX_PATH, "%s\\opensteamtool.toml", SteamInstallPath);
+    sprintf_s(SteamclientPath, MAX_PATH, "%s\\steamclient64.dll", SteamInstallPath);
+    sprintf_s(SteamUIPath, MAX_PATH, "%s\\steamui.dll", SteamInstallPath);
+    sprintf_s(DiversionPath, MAX_PATH, "%s\\bin\\diversion.dll", SteamInstallPath);
+    sprintf_s(DllDir, MAX_PATH, "%s", Utils::GetDllDirectory().string().c_str());
+    sprintf_s(LuaDir, MAX_PATH, "%s\\config\\lua", DllDir);
+    sprintf_s(ConfigPath, MAX_PATH, "%s\\opensteamtool.toml", DllDir);
     
     client_hModule = LoadLibraryA(SteamclientPath);
     if (!client_hModule) {

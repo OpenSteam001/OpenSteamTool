@@ -33,6 +33,7 @@ inline char SteamUIPath[MAX_PATH]      = {};
 inline char DiversionPath[MAX_PATH]    = {};
 inline char LuaDir[MAX_PATH]           = {};
 inline char ConfigPath[MAX_PATH]       = {};
+inline char DllDir[MAX_PATH]           = {};
 
 // The fake AppId used by -onlinefix (SpaceWar).
 constexpr AppId_t kOnlineFixAppId = 480;

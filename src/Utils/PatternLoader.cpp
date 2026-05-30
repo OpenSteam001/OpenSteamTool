@@ -3,6 +3,7 @@
 #include "Hash.h"
 #include "Log.h"
 #include "WinHttp.h"
+#include "DllDirectory.h"
 
 #include <chrono>
 #include <filesystem>
@@ -184,15 +185,15 @@ static void ShowDownloadFailedPopup(const std::string& dllName,
             "  1. Wait for the next signature update (usually within hours of "
             "a new Steam build), then restart Steam.\n"
             "  2. Drop a matching TOML at:\n"
-            "       <Steam>\\opensteamtool\\pattern\\" + ghSubdir + "\\" + sha256 + ".toml\n"
+            "       <DLL>\\opensteamtool\\pattern\\" + ghSubdir + "\\" + sha256 + ".toml\n"
             "  3. Check upstream:\n"
             "       https://github.com/OpenSteam001/steam-monitor/tree/pattern/" + ghSubdir + "\n"
             "  4. Report this hash so it gets prioritized:\n"
             "       https://github.com/OpenSteam001/OpenSteamTool/issues";
         MessageBoxA(nullptr, msg.c_str(),
-                    "OpenSteamTool - Unsupported Steam Version",
-                    MB_OK | MB_ICONWARNING | MB_TOPMOST);
-    }).detach();
+            "OpenSteamTool - Unsupported Steam Version",
+            MB_OK | MB_ICONWARNING | MB_TOPMOST);
+        }).detach();
 }
 
 } // namespace
@@ -223,10 +224,10 @@ bool Load(HMODULE module, const std::string& dllPath, const std::string& ghSubdi
     LOG_INFO("PatternLoader: {} sha256 = {} ({} ms)", ghSubdir, sha256, hashMs);
 
     // 2. Build local cache path and make sure the directory exists.
-    //    Cache lives at: <steam>/opensteamtool/pattern/<subdir>/<sha256>.toml
+    //    Cache lives at: <DLL>/opensteamtool/pattern/<subdir>/<sha256>.toml
     //    dllPath is always inside the Steam root directory.
-    fs::path steamRoot = fs::path(dllPath).parent_path();
-    fs::path cacheDir  = steamRoot / "opensteamtool" / "pattern" / ghSubdir;
+    fs::path dllRoot = Utils::GetDllDirectory();
+    fs::path cacheDir = dllRoot / "opensteamtool" / "pattern" / ghSubdir;
     fs::path cachePath = cacheDir / (sha256 + ".toml");
 
     std::error_code mkdirEc;
