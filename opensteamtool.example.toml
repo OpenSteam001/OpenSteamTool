@@ -72,3 +72,9 @@ timeout_recv_ms    = 10000
 #
 # url_template = "https://your.server/{channel}/{component}/{sha256}.toml"
 # url_template = "https://fast.jsdelivr.net/gh/OpenSteam001/steam-monitor@{channel}/{component}/{sha256}.toml"
+
+[inject]
+# In-game payload injected by -onlinefix for games whose multiplayer runs on
+# EOS matchmaking instead of Steam. Set to false to disable the
+# payload entirely; the 480 AppId swap for Steam-matchmaking games still works.
+enabled = true

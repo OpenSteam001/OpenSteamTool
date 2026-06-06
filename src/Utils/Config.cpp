@@ -63,6 +63,12 @@ namespace Config {
                 }
             }
 
+            // [inject]
+            if (auto inj = tbl["inject"].as_table()) {
+                if (auto val = (*inj)["enabled"].value<bool>())
+                    injectEnabled = *val;
+            }
+
             LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={} remote.url_template={}",
                      ManifestClient::ActiveProviderName(),
                      [&](){

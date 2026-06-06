@@ -1,4 +1,5 @@
 #include "Hooks_Misc.h"
+#include "Hooks_Inject.h"
 #include "HookMacros.h"
 #include "Utils/VehCommon.h"
 #include "dllmain.h"
@@ -26,13 +27,15 @@ namespace {
     static void OnSpawnProcessHit(PCONTEXT ctx, const VehCommon::Int3Site& /*site*/) {
         CGameID* pGameID = VehCommon::GetArg<CGameID*>(ctx, 5);
         AppId_t appId = static_cast<AppId_t>(pGameID->AppID(true));
+        const char* exePath = VehCommon::GetArg<const char*>(ctx, 2);
         const char* cmdLine = VehCommon::GetArg<const char*>(ctx, 3);
 
-        if (LuaConfig::HasDepot(appId) && cmdLine && strstr(cmdLine, "-onlinefix")) 
+        if (LuaConfig::HasDepot(appId) && cmdLine && strstr(cmdLine, "-onlinefix"))
         {
             g_OnlineFixRealAppId = appId;
             pGameID->SetAppID(kOnlineFixAppId);
             LOG_MISC_INFO("SpawnProcess: appid {} -> {}, cmd=\"{}\"",appId, kOnlineFixAppId, cmdLine);
+            Hooks_Inject::QueueInjection(exePath, appId);
         } else {
             g_OnlineFixRealAppId = 0;
         }

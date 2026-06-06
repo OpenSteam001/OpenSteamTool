@@ -28,4 +28,6 @@ namespace Config {
     // [remote]
     inline std::string remoteUrlTemplate;
 
+    // [inject]
+    inline bool injectEnabled = true;
 }

@@ -16,6 +16,7 @@ bool InitializeSteamComponents()
     sprintf_s(DiversionPath,   MAX_PATH, "%s\\bin\\diversion.dll", SteamInstallPath);
     sprintf_s(LuaDir,          MAX_PATH, "%s\\config\\lua",        SteamInstallPath);
     sprintf_s(ConfigPath,      MAX_PATH, "%s\\opensteamtool.toml", SteamInstallPath);
+    sprintf_s(PayloadPath,     MAX_PATH, "%s\\OnlineFix.dll",      SteamInstallPath);
     
     client_hModule = LoadLibraryA(SteamclientPath);
     if (!client_hModule) {

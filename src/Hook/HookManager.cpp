@@ -1,6 +1,7 @@
 #include "HookManager.h"
 #include "Hooks_CallBack.h"
 #include "Hooks_Decryption.h"
+#include "Hooks_Inject.h"
 #include "Hooks_IPC.h"
 #include "Hooks_KeyValues.h"
 #include "Hooks_Manifest.h"
@@ -26,6 +27,7 @@ namespace SteamClient {
     void CoreHook() {
         Hooks_CallBack::Install();
         Hooks_Decryption::Install();
+        Hooks_Inject::Install();
         Hooks_IPC::Install();
         // Hooks_KeyValues::Install();
         Hooks_Manifest::Install();
@@ -37,6 +39,7 @@ namespace SteamClient {
     void CoreUnhook() {
         Hooks_CallBack::Uninstall();
         Hooks_Decryption::Uninstall();
+        Hooks_Inject::Uninstall();
         Hooks_IPC::Uninstall();
         // Hooks_KeyValues::Uninstall();
         Hooks_Manifest::Uninstall();

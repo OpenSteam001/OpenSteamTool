@@ -100,6 +100,7 @@ add_library(OpenSteamTool SHARED
     Hook/HookManager.cpp
     Hook/Hooks_CallBack.cpp
     Hook/Hooks_Decryption.cpp
+    Hook/Hooks_Inject.cpp
     Hook/Hooks_IPC.cpp
     Hook/Hooks_IPC_ISteamUser.cpp
     Hook/Hooks_IPC_ISteamUtils.cpp
@@ -151,4 +152,22 @@ add_library(dwmapi SHARED
 add_library(xinput1_4 SHARED
     xinput1_4/xinput1_4.cpp
     xinput1_4/xinput1_4.def
+)
+
+# ---------------------------------------------------------------------------
+# OnlineFix — DLL injected into a game launched with -onlinefix
+# ---------------------------------------------------------------------------
+add_library(OnlineFix SHARED
+    Payload/payload.cpp
+    Payload/PayloadLog.cpp
+    Payload/EosBridge.cpp
+    Payload/SelfPropagate.cpp
+)
+set_target_properties(OnlineFix PROPERTIES PREFIX "" OUTPUT_NAME "OnlineFix")
+target_include_directories(OnlineFix PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(OnlineFix PRIVATE detours psapi)
+
+# Logging is compiled in only for Debug, same as the host DLL.
+target_compile_definitions(OnlineFix PRIVATE
+    $<$<CONFIG:Debug>:OPENSTEAMTOOL_LOGGING_ENABLED>
 )

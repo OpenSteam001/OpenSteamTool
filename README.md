@@ -65,6 +65,7 @@ The `extract_tickets` tool dumps the `AppTicket` and `ETicket` hex strings you n
 
 ### Online Fix
 - Add `-onlinefix` to the Steam launch parameters to enable 480-based online play in games that use lobby matchmaking. The current limitation is that only one such game can run at a time.To revert, simply remove -onlinefix from the launch parameters — online play returns to normal on the next launch.
+- Games that use EOS matchmaking instead of Steam are also supported.
 
 ## Future
 - For games protected by Denuvo and SteamStub, find a safe timing to switch `GetSteamID` (see `src/Hook/Hooks_IPC.cpp#Handler_IClientUser_GetSteamID` TODO) so save files are not affected.(**Suggestions welcome — when is the earliest point after game initialization that we can safely switch the
@@ -128,6 +129,11 @@ paths = []
 # Optional metadata mirror. See "Steam version compatibility" below.
 [remote]
 # url_template = "https://your.server/{channel}/{component}/{sha256}.toml"
+
+# Disable in-game payload injection used by -onlinefix (EOS matchmaking).
+# The 480 AppId swap for Steam-matchmaking games is unaffected.
+[inject]
+enabled = true
 ```
 
 ### Manifest via Lua
