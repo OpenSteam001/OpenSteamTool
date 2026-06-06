@@ -31,7 +31,15 @@ namespace WinHttp {
         size_t colon = hostPart.find(':');
         if (colon != std::string::npos) {
             out.host = std::wstring(hostPart.begin(), hostPart.begin() + colon);
-            out.port = static_cast<INTERNET_PORT>(std::stoi(hostPart.substr(colon + 1)));
+            auto portStr = hostPart.substr(colon + 1);
+            try {
+                size_t end = 0;
+                long port = std::stol(portStr, &end);
+                if (end != portStr.size() || port <= 0 || port > 65535) return out;
+                out.port = static_cast<INTERNET_PORT>(port);
+            } catch (...) {
+                return out;
+            }
         } else {
             out.host = std::wstring(hostPart.begin(), hostPart.end());
         }
