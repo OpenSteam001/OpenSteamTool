@@ -139,7 +139,7 @@ paths = []
 
 Se admiten dos funciones de código de manifiesto:
 
-### 'fetch_manifest_code(gid)'
+### `fetch_manifest_code(gid)`
 
 Función básica que recibe únicamente el GID del manifiesto.
 
