@@ -10,7 +10,8 @@ OpenSteamTool is a Windows DLL project built with CMake.
 
 ## Traductions:
 <p align="center">
-  <a href="/README.md"><img src="https://flagcdn.com/256x192/us.png" width="48" alt="United States Flag"></a> •
+  <a href="/README.md"><img src="https://flagcdn.com/256x192/us.png" width="48" alt="United States Flag"></a> 
+  •
   <a href="/docs/ES.md"><img src="https://flagcdn.com/256x192/es.png" width="48" alt="Spain Flag"></a>
 </p>
 
