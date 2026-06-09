@@ -8,6 +8,12 @@
 
 OpenSteamTool is a Windows DLL project built with CMake.
 
+## Languages:
+<p align="center">
+  <a href="/README.md">English</a> •
+  <a href="/docs/ES.md">Español</a>
+</p>
+
 ## Feature
 
 ### Core Unlocks
