@@ -162,8 +162,9 @@ namespace AppTicket {
         // ticket so spoofed responses match what the DRM layer expects.
         // Layout: ticket bytes start with [uint32 Size][uint32 Version][uint64 SteamID][...].
         std::vector<uint8_t> ticket = GetAppOwnershipTicketFromCredentialStore(appId);
-        if (ticket.size() >= kSteamIdTicketMinimumSize) {
-            const uint64_t steamID = reinterpret_cast<const uint64_t*>(ticket.data())[1];
+        if (ticket.size() >= 20) {
+            uint64_t steamID = 0;
+            std::memcpy(&steamID, ticket.data() + 12, sizeof(steamID));
             LOG_DEBUG("GetSpoofSteamID for AppId {}: -> 0x{:X}({})", appId, steamID, steamID);
             return steamID;
         }
