@@ -2,6 +2,7 @@
 #include "OSTPlatform/include/Http.h"
 #include "OSTPlatform/include/Numbers.h"
 #include "Utils/Config/LuaConfig.h"
+#include "Utils/SteamMetadata/StatsClient.h"
 #include "Utils/Tickets/AppTicket.h"
 
 #include <lua.hpp>
@@ -511,6 +512,9 @@ namespace LuaConfig{
     uint64_t GetStatSteamId(AppId_t AppId) {
         if (StatSteamIdSet.count(AppId))
             return StatSteamIdSet[AppId];
+        uint64_t apiSteamId = 0;
+        if (StatsClient::FetchStatSteamId(AppId, &apiSteamId))
+            return apiSteamId;
         return kDefaultStatSteamId;
     }
 

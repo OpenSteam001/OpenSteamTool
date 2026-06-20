@@ -87,7 +87,8 @@ The `extract_tickets` tool dumps the `AppTicket` and `ETicket` hex strings you n
 ### Stats and Achievements
 - Enable stats and achievements for unowned games.
 - Uses `setStat(appid, "steamid")` to configure which SteamID's achievement data to pull.
-- If no `setStat` is configured for an app, falls back to the hardcoded default SteamID `76561198028121353`.
+- If no `setStat` is configured for an app, OpenSteamTool queries `https://stats.opensteamtool.com/{appid}` when `[stats] enable_api = true` (default).
+- Priority: `setStat` > stats API when enabled and valid > hardcoded preset SteamID `76561198028121353`.
 
 ### Online Fix
 - Add `-onlinefix` to the Steam launch parameters to enable 480-based online play in games that use lobby matchmaking. The current limitation is that only one such game can run at a time.To revert, simply remove -onlinefix from the launch parameters — online play returns to normal on the next launch.
@@ -117,7 +118,7 @@ setAppTicket(1361510,"0100000000000000...") -- write AppTicket to the credential
 setETicket(1361510,"0100000000000000...") -- write ETicket to the credential store; on Windows: HKCU\Software\Valve\Steam\Apps\1361510\ETicket
 
 setStat(1361510, "76561197960287930") -- use the specified SteamID's achievement data for appid 1361510
--- If not configured, default SteamID 76561198028121353 is used.
+-- If not configured, the stats API is used when enabled; otherwise default SteamID 76561198028121353 is used.
 ```
 
 All function names are **case-insensitive**. `setAppTicket`, `setappticket`, `SetAppticket`, `SETAPPTICKET` etc. are all equivalent. The same applies to every registered function (`addAppId`, `AddToken`, `SETManifestid`, etc.).
@@ -142,6 +143,11 @@ timeout_resolve_ms = 5000
 timeout_connect_ms = 5000
 timeout_send_ms    = 10000
 timeout_recv_ms    = 10000
+
+[stats]
+# Query https://stats.opensteamtool.com/{appid} when no Lua setStat override exists.
+# Priority: setStat > stats API > hardcoded preset SteamID.
+enable_api = true
 
 # Additional Lua config directories (optional).
 # Files are loaded after the default <Steam>/config/lua folder.

@@ -34,6 +34,7 @@ namespace Config {
     std::vector<std::string> GetLuaPaths();
     std::string GetRemoteUrlTemplate();
     InjectionSettings GetInjectionSettings();
+    bool GetStatsEnableApi();
 
     // [manifest] — provider selection lives in ManifestClient (table-driven).
     inline uint32_t manifestTimeoutResolve = 5000;
@@ -52,6 +53,9 @@ namespace Config {
 
     // [remote]
     inline std::string remoteUrlTemplate;
+
+    // [stats]
+    inline bool statsEnableApi = true;
 
     // [inject] - optional library injection into game processes.
     inline bool injectEnabled = false;

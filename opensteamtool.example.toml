@@ -56,6 +56,12 @@ timeout_connect_ms = 5000
 timeout_send_ms    = 10000
 timeout_recv_ms    = 10000
 
+[stats]
+# Automatically query https://stats.opensteamtool.com/{appid} for a recommended
+# SteamID when no Lua setStat(appid, "steamid") override exists.
+# Priority: setStat > stats API when enabled and valid > hardcoded preset SteamID.
+enable_api = true
+
 # Additional Lua config directories (optional).
 # Files are loaded after the default <Steam>/config/lua folder.
 # The default folder is always loaded last so user files take priority.
