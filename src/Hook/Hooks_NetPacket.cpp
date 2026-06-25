@@ -888,6 +888,24 @@ namespace Hooks_NetPacket_OnlineFix {
             }
         }
 
+        // Rich Presence: rewrite topmost unowned game to appid 480 so the
+        // server broadcasts it to friends.  Steam drops buddy broadcasts for
+        // unowned appids; everyone owns SpaceWar.  game_extra_info carries
+        // the real name.
+        if (!patched) {
+            AppId_t trackedId = Hooks_NetPacket_RichPresence::g_PlayingAppId;
+            if (trackedId != 0 && trackedId != kOnlineFixAppId) {
+                std::string name = Hooks_Misc::GetGameNameByAppID(trackedId);
+                if (!name.empty()) {
+                    auto* topGame = msg.mutable_games_played(msg.games_played_size() - 1);
+                    topGame->set_game_id(kOnlineFixAppId);
+                    topGame->set_game_extra_info(name);
+                    patched = true;
+                    LOG_ONLINEFIX_INFO("RichPresence: appid {} -> 480 + name '{}'", trackedId, name);
+                }
+            }
+        }
+
         if (!patched) return false;
 
         g_cbSendNewBody = static_cast<uint32>(msg.ByteSizeLong());
