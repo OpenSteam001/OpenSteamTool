@@ -252,7 +252,12 @@ namespace {
             const bool executable = EndsWithInsensitive(module.path, ".exe");
             const bool dll = EndsWithInsensitive(module.path, ".dll");
             if (!executable && !dll) continue;
-            if (module.size < kMinPackedModuleBytes) {
+            // [PATCH #117] Always scan the main game executable regardless of size.
+            // Denuvo packs the .exe itself, and some titles (e.g. Sniper Elite 4
+            // appid 312660, 71MB) fall under the 80MB floor and were silently
+            // skipped -> denuvo never detected -> auth never engaged -> 8850000A.
+            // Keep the size floor only for DLLs (the original perf optimization).
+            if (!executable && module.size < kMinPackedModuleBytes) {
                 LOG_PIPE_TRACE("DenuvoAuth: module skipped below packed size floor path={} size={} ({:.2f} MB) min={} ({:.2f} MB)",
                                module.path,
                                module.size,

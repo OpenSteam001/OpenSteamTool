@@ -151,7 +151,7 @@ namespace {
         return authIt == g_processAuth.end() ? nullptr : &authIt->second;
     }
 
-    void EnsureScanned(ProcessAuth& auth, const ProcessKey& process) {
+    void EnsureScanned(ProcessAuth& auth, const ProcessKey& process, AppId_t appId) {
         if (auth.scanned) {
             LOG_PIPE_TRACE("DenuvoAuth: reusing cached protection result {} denuvo={}",
                            process.DebugString(), auth.denuvo);
@@ -160,6 +160,16 @@ namespace {
 
         auth.scanned = true;
         auth.denuvo = ScanProtection(process.pid).denuvoDetected;
+        // Fallback when signature detection misses a real Denuvo title (some builds
+        // slip both the OEP and legacy-string heuristics — see linked issue). Per the
+        // README, setAppTicket/setETicket are only used for ticket-gated (Denuvo)
+        // games, so an injected EncryptedAppTicket for this app is a strong "the user
+        // intends Denuvo auth" signal; engage the auth path instead of giving up.
+        if (!auth.denuvo &&
+            !AppTicket::GetEncryptedTicketFromCredentialStore(appId).empty()) {
+            LOG_PIPE_INFO("DenuvoAuth: scan missed but injected eticket present; treating as Denuvo appid={}", appId);
+            auth.denuvo = true;
+        }
         if (!auth.denuvo) auth.stage = Stage::None;
     }
 
@@ -174,7 +184,7 @@ void Apply(const PipeContext& ctx) {
     ProcessAuth& auth = g_processAuth[ctx.process];
     g_pipeProcess[pipeKey] = ctx.process;
 
-    EnsureScanned(auth, ctx.process);
+    EnsureScanned(auth, ctx.process, ctx.appId);
     auth.OnHandshake(ctx, pipeKey);
 }
 
