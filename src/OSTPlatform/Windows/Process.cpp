@@ -147,6 +147,62 @@ std::optional<PVOID> QueryWow64EnvironmentAddress(HANDLE process) {
     return reinterpret_cast<PVOID>(static_cast<uintptr_t>(*environment32));
 }
 
+std::optional<std::wstring> ReadCommandLineNative(HANDLE process) {
+    const auto pebAddress = QueryNativePebAddress(process);
+    if (!pebAddress) return std::nullopt;
+
+    const auto processParameters = ReadRemoteValue<PVOID>(
+        process,
+        AddOffset(*pebAddress, offsetof(NtAbi::Peb, processParameters)));
+    if (!processParameters || !*processParameters) return std::nullopt;
+
+    const auto commandLine = ReadRemoteValue<NtAbi::UnicodeString>(
+        process,
+        AddOffset(*processParameters, offsetof(NtAbi::RtlUserProcessParameters, commandLine)));
+    if (!commandLine || !commandLine->buffer || commandLine->length == 0) return std::nullopt;
+
+    const size_t chars = commandLine->length / sizeof(wchar_t);
+    if (chars == 0 || chars > kMaxEnvironmentBytes / sizeof(wchar_t)) return std::nullopt;
+
+    std::wstring value(chars, L'\0');
+    size_t bytesRead = 0;
+    if (!TryReadProcessMemory(process, commandLine->buffer, value.data(),
+                              chars * sizeof(wchar_t), &bytesRead)) {
+        return std::nullopt;
+    }
+    value.resize(bytesRead / sizeof(wchar_t));
+    return value;
+}
+
+std::optional<std::wstring> ReadCommandLineWow64(HANDLE process) {
+    const auto peb32 = QueryWow64PebAddress(process);
+    if (!peb32) return std::nullopt;
+
+    const auto processParameters32 = ReadRemoteValue<ULONG>(
+        process,
+        AddOffset(reinterpret_cast<const void*>(*peb32), offsetof(NtAbi::Peb32, processParameters)));
+    if (!processParameters32 || *processParameters32 == 0) return std::nullopt;
+
+    const auto commandLine = ReadRemoteValue<NtAbi::UnicodeString32>(
+        process,
+        AddOffset(reinterpret_cast<const void*>(static_cast<uintptr_t>(*processParameters32)),
+                  offsetof(NtAbi::RtlUserProcessParameters32, commandLine)));
+    if (!commandLine || commandLine->buffer == 0 || commandLine->length == 0) return std::nullopt;
+
+    const size_t chars = commandLine->length / sizeof(wchar_t);
+    if (chars == 0 || chars > kMaxEnvironmentBytes / sizeof(wchar_t)) return std::nullopt;
+
+    std::wstring value(chars, L'\0');
+    size_t bytesRead = 0;
+    if (!TryReadProcessMemory(process,
+                              reinterpret_cast<const void*>(static_cast<uintptr_t>(commandLine->buffer)),
+                              value.data(), chars * sizeof(wchar_t), &bytesRead)) {
+        return std::nullopt;
+    }
+    value.resize(bytesRead / sizeof(wchar_t));
+    return value;
+}
+
 std::optional<size_t> QueryReadableRegionBytes(HANDLE process, PVOID address) {
     const auto ntQueryVirtualMemory = NtQueryVirtualMemoryProc();
     if (!ntQueryVirtualMemory) return std::nullopt;
@@ -308,6 +364,17 @@ std::optional<std::string> GetEnvironmentVariableValue(uint32_t pid, std::wstrin
     const auto environment = ReadEnvironmentBlock(process.get());
     if (!environment) return std::nullopt;
     return FindEnvironmentVariable(*environment, name);
+}
+
+std::optional<std::string> GetProcessCommandLine(uint32_t pid) {
+    Windows::UniqueHandle process =
+        OpenProcessHandle(pid, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ);
+    if (!process) return std::nullopt;
+
+    auto commandLine = ReadCommandLineWow64(process.get());
+    if (!commandLine) commandLine = ReadCommandLineNative(process.get());
+    if (!commandLine) return std::nullopt;
+    return Encoding::WideToUtf8(*commandLine);
 }
 
 std::vector<ModuleInfo> EnumerateModules(uint32_t pid) {

@@ -105,11 +105,24 @@ namespace {
         PipeManager::OnHandshake(pipe);
     }
 
+    // Detect the first SteamNetworkingSockets call (interface 46) so GetAppID can
+    // flip to 480 for P2P games. Skipped once already seen or when not in onlinefix.
+    static void DetectNetworkingSockets(CUtlBuffer* pRead) {
+        if (!Hooks_Misc::IsOnlineFixActive() || Hooks_Misc::ShouldReportOnlineFixAppId()) return;
+        IPCMessages::IPCRequest request{pRead};
+        if (!request.ok() || request.command() != EIPCCommand::InterfaceCall) return;
+        IPCMessages::IPCInterfaceCall call{request.body()};
+        if (!call.ok()) return;
+        if (call.interfaceID() == EIPCInterface::IClientNetworkingSocketsSerialized)
+            Hooks_Misc::NotifyNetworkingSocketsUsed();
+    }
+
     HOOK_FUNC(IPCProcessMessage, bool,void* pServer, HSteamPipe hSteamPipe,
               CUtlBuffer* pRead, CUtlBuffer* pWrite)
     {
         // handle handshake messages
         HandleHandshake(pServer, hSteamPipe, pRead);
+        DetectNetworkingSockets(pRead);
 
         IPCDispatch dispatch = ResolveDispatch(pServer, hSteamPipe, pRead);
         // If we didn't find a handler for this message, just pass through to the original function.

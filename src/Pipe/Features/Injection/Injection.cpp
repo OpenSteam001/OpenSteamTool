@@ -1,79 +1,84 @@
 #include "Pipe/Features/Injection/Injection.h"
 
+#include "OSTPlatform/include/Process.h"
 #include "OSTPlatform/include/RemoteProcess.h"
-#include "OSTPlatform/include/Encoding.h"
 #include "Utils/Config/Config.h"
 #include "Utils/Logging/Log.h"
 
-#include "dllmain.h"
-
 #include <filesystem>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_set>
 
 namespace PipeManager::Injection {
 namespace {
 
-    std::mutex g_mutex;
-    std::unordered_set<ProcessKey, ProcessKeyHash> g_injected;
-
-    bool WasInjected(const ProcessKey& key) {
-        std::scoped_lock lock(g_mutex);
-        return g_injected.contains(key);
-    }
-
-    void MarkInjected(const ProcessKey& key) {
-        std::scoped_lock lock(g_mutex);
-        g_injected.insert(key);
-    }
-
-    std::filesystem::path ResolveLibraryPath(const std::string& configured) {
-        std::filesystem::path path(OSTPlatform::Encoding::Utf8ToWide(configured));
-        if (path.is_absolute()) return path;
-
-        std::filesystem::path base(OSTPlatform::Encoding::Utf8ToWide(SteamInstallPath));
-        return base / path;
-    }
-
-    const std::string* ConfiguredLibraryFor(const Config::InjectionSettings& settings,
-                                            OSTPlatform::RemoteProcess::Architecture architecture) {
-        // Unknown architecture means we cannot choose a safe library path.
-        switch (architecture) {
-        case OSTPlatform::RemoteProcess::Architecture::X64:
-            return settings.libraryX64.empty() ? nullptr : &settings.libraryX64;
-        case OSTPlatform::RemoteProcess::Architecture::X86:
-            return settings.libraryX86.empty() ? nullptr : &settings.libraryX86;
-        case OSTPlatform::RemoteProcess::Architecture::Unknown:
-            return nullptr;
+    // Keyed on (process, path) so each DLL injects at most once per process
+    // while several [[inject]] entries can still target the same game.
+    struct InjectedKey {
+        ProcessKey  process;
+        std::string path;
+        bool operator==(const InjectedKey&) const = default;
+    };
+    struct InjectedKeyHash {
+        std::size_t operator()(const InjectedKey& key) const noexcept {
+            return ProcessKeyHash{}(key.process) ^ std::hash<std::string>{}(key.path);
         }
-        return nullptr;
+    };
+
+    std::mutex g_mutex;
+    std::unordered_set<InjectedKey, InjectedKeyHash> g_injected;
+
+    bool ClaimInjection(const InjectedKey& key) {
+        std::scoped_lock lock(g_mutex);
+        return g_injected.insert(key).second;
+    }
+
+    bool Matches(const Config::InjectDll& dll, const PipeContext& ctx,
+                 const std::optional<std::string>& cmdLine) {
+        if (!dll.allGames && !ctx.trackedApp) return false;
+        if (!dll.whenAppids.empty() && !dll.whenAppids.count(ctx.appId)) return false;
+        if (!dll.whenCmdline.empty() &&
+            (!cmdLine || cmdLine->find(dll.whenCmdline) == std::string::npos)) {
+            return false;
+        }
+        return true;
     }
 
 } // namespace
 
 void Apply(const PipeContext& ctx) {
-    const Config::InjectionSettings settings = Config::GetInjectionSettings();
-    if (!settings.enabled) return;
+    if (Config::injectDlls.empty()) return;
     if (!ctx.gameProcess) return;
 
-    const auto architecture = OSTPlatform::RemoteProcess::GetArchitecture(ctx.process.pid);
-    const std::string* configuredLibrary = ConfiguredLibraryFor(settings, architecture);
-    if (!configuredLibrary) return;
-    if (WasInjected(ctx.process)) return;
+    // Read the command line lazily: only if an injection entry uses it.
+    std::optional<std::string> cmdLine;
+    bool cmdLineResolved = false;
+    auto commandLine = [&]() -> const std::optional<std::string>& {
+        if (!cmdLineResolved) {
+            cmdLine = OSTPlatform::Process::GetProcessCommandLine(ctx.process.pid);
+            cmdLineResolved = true;
+        }
+        return cmdLine;
+    };
 
-    const std::filesystem::path libraryPath = ResolveLibraryPath(*configuredLibrary);
-    const auto status = OSTPlatform::RemoteProcess::InjectLibrary(ctx.process.pid, libraryPath);
-    if (status == OSTPlatform::RemoteProcess::InjectStatus::Ok) {
-        MarkInjected(ctx.process);
-        LOG_PIPE_INFO("Injection: injected {} library into pid={} path={}",
-                      OSTPlatform::RemoteProcess::ToString(architecture), ctx.process.pid, libraryPath.string());
-    } else {
-        LOG_PIPE_WARN("Injection: failed pid={} arch={} status={} path={}",
-                      ctx.process.pid,
-                      OSTPlatform::RemoteProcess::ToString(architecture),
-                      OSTPlatform::RemoteProcess::ToString(status),
-                      libraryPath.string());
+    for (const auto& dll : Config::injectDlls) {
+        const std::optional<std::string>& cmd = dll.whenCmdline.empty() ? cmdLine : commandLine();
+        if (!Matches(dll, ctx, cmd)) continue;
+        if (!ClaimInjection({ctx.process, dll.path})) continue;
+
+        const std::filesystem::path path(dll.path);
+        const auto status = OSTPlatform::RemoteProcess::InjectLibrary(ctx.process.pid, path);
+        if (status == OSTPlatform::RemoteProcess::InjectStatus::Ok) {
+            LOG_INJECT_INFO("injected pid={} appid={} dll=\"{}\"",
+                            ctx.process.pid, ctx.appId, path.filename().string());
+        } else {
+            LOG_INJECT_WARN("inject failed pid={} appid={} status={} dll=\"{}\"",
+                            ctx.process.pid, ctx.appId,
+                            OSTPlatform::RemoteProcess::ToString(status),
+                            path.filename().string());
+        }
     }
 }
 

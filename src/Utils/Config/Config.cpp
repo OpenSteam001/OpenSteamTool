@@ -18,7 +18,7 @@ namespace {
         std::vector<std::string> luaPaths;
         std::string remoteUrlTemplate;
         bool statsEnableApi = true;
-        InjectionSettings injection;
+        std::vector<InjectDll> injectDlls;
         CloudSettings cloud;
     };
 
@@ -53,9 +53,7 @@ namespace {
         luaPaths               = snapshot.luaPaths;
         remoteUrlTemplate      = snapshot.remoteUrlTemplate;
         statsEnableApi         = snapshot.statsEnableApi;
-        injectEnabled          = snapshot.injection.enabled;
-        injectLibraryX86       = snapshot.injection.libraryX86;
-        injectLibraryX64       = snapshot.injection.libraryX64;
+        injectDlls             = snapshot.injectDlls;
         cloudEnabled           = snapshot.cloud.enabled;
         cloudLibrary           = snapshot.cloud.library;
     }
@@ -148,14 +146,32 @@ namespace {
                 }
             }
 
-            // [inject]
-            if (auto inject = tbl["inject"].as_table()) {
-                if (auto val = (*inject)["enabled"].value<bool>())
-                    snapshot.injection.enabled = *val;
-                if (auto val = (*inject)["library_x86"].value<std::string>())
-                    snapshot.injection.libraryX86 = *val;
-                if (auto val = (*inject)["library_x64"].value<std::string>())
-                    snapshot.injection.libraryX64 = *val;
+            // [[inject]]
+            if (auto arr = tbl["inject"].as_array()) {
+                std::filesystem::path steamDir = std::filesystem::path(configPath).parent_path();
+                for (auto& node : *arr) {
+                    auto t = node.as_table();
+                    if (!t) continue;
+                    auto path = (*t)["path"].value<std::string>();
+                    if (!path || path->empty()) continue;
+
+                    // Bare names resolve next to steam.exe.
+                    std::filesystem::path full = *path;
+                    if (full.is_relative()) full = steamDir / full;
+                    if (!std::filesystem::exists(full)) {
+                        LOG_WARN("inject dll not found: {}", full.string());
+                        continue;
+                    }
+
+                    InjectDll dll;
+                    dll.path = full.string();
+                    if (auto val = (*t)["when_cmdline"].value<std::string>()) dll.whenCmdline = *val;
+                    if (auto val = (*t)["all_games"].value<bool>())           dll.allGames   = *val;
+                    if (auto ids = (*t)["when_appids"].as_array())
+                        for (auto& id : *ids)
+                            if (auto v = id.value<int64_t>()) dll.whenAppids.insert(static_cast<AppId_t>(*v));
+                    snapshot.injectDlls.push_back(std::move(dll));
+                }
             }
 
             // [cloud]
@@ -225,15 +241,6 @@ namespace {
     std::string GetRemoteUrlTemplate() {
         std::lock_guard lock(g_mutex);
         return remoteUrlTemplate;
-    }
-
-    InjectionSettings GetInjectionSettings() {
-        std::lock_guard lock(g_mutex);
-        return {
-            injectEnabled,
-            injectLibraryX86,
-            injectLibraryX64,
-        };
     }
 
     bool GetStatsEnableApi() {
