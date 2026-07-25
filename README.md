@@ -160,6 +160,20 @@ enable_api = true
 [lua]
 paths = []
 
+[cloud]
+# Optional Steam Cloud save redirection for unlocked ("lua") games, powered by
+# CloudRedirect (https://github.com/Selectively11/CloudRedirect).
+# When enabled, OpenSteamTool loads cloud_redirect.dll inside Steam, registers
+# every addappid() game as a redirected app, and routes their Steam Cloud RPCs
+# through CloudRedirect's cloud-save engine.
+#
+# Provider sign-in (Google Drive / OneDrive / local folder) is still done through
+# CloudRedirect's own companion app — OpenSteamTool only hosts the DLL.
+enabled = false
+# Path to cloud_redirect.dll. Absolute, or relative to the Steam root directory.
+# Defaults to "<Steam>/cloud_redirect.dll" when unset.
+# library = "cloud_redirect.dll"
+
 [inject]
 # Optional library injection into game processes.
 # The injected library must match the target process architecture.
