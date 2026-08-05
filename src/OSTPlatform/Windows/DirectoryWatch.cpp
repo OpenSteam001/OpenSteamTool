@@ -98,7 +98,7 @@ bool Watch::IssueRead() {
             impl_->dir.get(),
             impl_->buffer.data(),
             static_cast<DWORD>(impl_->buffer.size()),
-            FALSE,
+            TRUE,
             FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
             &dummy,
             &impl_->overlapped,
