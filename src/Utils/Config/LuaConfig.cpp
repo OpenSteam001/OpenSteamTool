@@ -689,11 +689,21 @@ namespace LuaConfig{
         if (!std::filesystem::exists(directory, ec) || !std::filesystem::is_directory(directory, ec))
             return files;
 
-        for (const auto& entry : std::filesystem::directory_iterator(directory, ec)) {
-            if (ec) break;
-            if (!entry.is_regular_file()) continue;
-            if (entry.path().extension() != ".lua") continue;
-            files.push_back(entry.path().string());
+        std::vector<std::filesystem::path> pending = { std::filesystem::path(directory) };
+        while (!pending.empty()) {
+            std::filesystem::path current = pending.back();
+            pending.pop_back();
+
+            std::error_code dec;
+            for (const auto& entry : std::filesystem::directory_iterator(current, dec)) {
+                if (dec) break;
+                std::error_code fec;
+                if (entry.is_directory(fec)) {
+                    pending.push_back(entry.path());
+                } else if (entry.is_regular_file(fec) && entry.path().extension() == ".lua") {
+                    files.push_back(entry.path().string());
+                }
+            }
         }
         return files;
     }
