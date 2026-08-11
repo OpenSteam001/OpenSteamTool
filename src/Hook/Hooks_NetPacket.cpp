@@ -4,6 +4,7 @@
 #include "HookMacros.h"
 #include "dllmain.h"
 #include "Utils/Tickets/AppTicket.h"
+#include "Utils/Tickets/LegacyCDKey.h"
 #include "Utils/Support/FnvHash.h"
 #include "Utils/CloudRedirect/CloudRedirectHost.h"
 #include <chrono>
@@ -1119,6 +1120,101 @@ namespace Hooks_NetPacket_Cloud {
 
 
 // ════════════════════════════════════════════════════════════════
+//  Legacy third-party CD key ("Updating product key")
+//
+//  k_EMsgClientGetLegacyGameKey (730) is a non-proto STRUCT message, so it
+//  never reaches the proto SendJob/RecvJob path (UnpackRaw bails on the missing
+//  proto flag). We catch the outbound request straight off the send hook,
+//  answer it locally with a resolved key, suppress the real send, and deliver
+//  the synthesized 785 response from the RecvPkt hook — the exact "answered
+//  locally" trick Hooks_NetPacket_Cloud uses.
+// ════════════════════════════════════════════════════════════════
+namespace Hooks_NetPacket_LegacyKey {
+
+    std::mutex                     g_queueMutex;
+    std::deque<std::vector<uint8>> g_pending;   // ready-to-inject 785 struct frames
+
+    // Returns true when we answered the request locally — the caller must then
+    // suppress the outbound frame.
+    bool HandleSend(const uint8* pubData, uint32 cubData) {
+        if (cubData < sizeof(ExtendedMsgHdr) + sizeof(MsgClientGetLegacyGameKey))
+            return false;
+
+        const auto* reqHdr  = reinterpret_cast<const ExtendedMsgHdr*>(pubData);
+        const auto* reqBody = reinterpret_cast<const MsgClientGetLegacyGameKey*>(
+                                  pubData + sizeof(ExtendedMsgHdr));
+        const AppId_t appId     = reqBody->m_unAppId;
+        const uint32  accountId = static_cast<uint32>(reqHdr->m_ulSteamID & 0xFFFFFFFFull);
+
+        std::optional<std::string> key = LegacyCDKey::Resolve(appId, accountId);
+        if (!key) return false;   // not a managed app — let Steam's real flow run
+
+        // Steam stores the legacy key as a NUL-terminated string; length counts
+        // the terminator. (One runtime-verify point — see plan.)
+        const uint32 cchKey = static_cast<uint32>(key->size()) + 1;
+        const uint32 total  = sizeof(ExtendedMsgHdr)
+                            + sizeof(MsgClientGetLegacyGameKeyResponse) + cchKey;
+        if (total > kMaxPacketSize) {
+            LOG_NETPACKET_WARN("LegacyKey: app={} response too large ({} bytes), passing through",
+                               appId, total);
+            return false;
+        }
+
+        std::vector<uint8> pkt(total);
+        auto* rh = reinterpret_cast<ExtendedMsgHdr*>(pkt.data());
+        *rh = *reqHdr;                                            // keep version/canary/steamid/session
+        rh->eMsg          = k_EMsgClientGetLegacyGameKeyResponse; // non-proto (flag stays clear)
+        rh->m_JobIDTarget = reqHdr->m_JobIDSource;               // correlate response to request
+        rh->m_JobIDSource = k_GIDNil;
+
+        auto* rb = reinterpret_cast<MsgClientGetLegacyGameKeyResponse*>(
+                       pkt.data() + sizeof(ExtendedMsgHdr));
+        rb->m_unAppId = appId;
+        rb->m_eResult = k_EResultOK;
+        rb->m_cchKey  = cchKey;
+        memcpy(pkt.data() + sizeof(ExtendedMsgHdr) + sizeof(MsgClientGetLegacyGameKeyResponse),
+               key->c_str(), cchKey);                             // includes the NUL
+
+        {
+            std::lock_guard lk(g_queueMutex);
+            if (g_pending.size() < 64)
+                g_pending.push_back(std::move(pkt));
+        }
+        LOG_NETPACKET_DEBUG("LegacyKey: app={} answered locally ({} bytes, key '{}')",
+                            appId, total, *key);
+        return true;
+    }
+
+    // Deliver queued responses by borrowing the carrier packet for one oRecvPkt
+    // call each — identical to Hooks_NetPacket_Cloud::Drain. Runs on the network
+    // thread from inside the RecvPkt hook.
+    void Drain(void* pThis, CNetPacket* pCarrier,
+               bool (*invokeOriginal)(void*, CNetPacket*))
+    {
+        for (;;) {
+            std::vector<uint8> pkt;
+            {
+                std::lock_guard lk(g_queueMutex);
+                if (g_pending.empty()) return;
+                pkt = std::move(g_pending.front());
+                g_pending.pop_front();
+            }
+
+            uint8* origData = pCarrier->m_pubData;
+            uint32 origSize = pCarrier->m_cubData;
+            pCarrier->m_pubData = pkt.data();
+            pCarrier->m_cubData = static_cast<uint32>(pkt.size());
+            invokeOriginal(pThis, pCarrier);
+            pCarrier->m_pubData = origData;
+            pCarrier->m_cubData = origSize;
+            LOG_NETPACKET_DEBUG("LegacyKey: delivered {}-byte response", pkt.size());
+        }
+    }
+
+} // namespace Hooks_NetPacket_LegacyKey
+
+
+// ════════════════════════════════════════════════════════════════
 //  Dispatch
 // ════════════════════════════════════════════════════════════════
 namespace {
@@ -1286,6 +1382,18 @@ namespace {
         if (eWebSocketOpCode != k_eWebSocketOpCode_Binary)
             return oBBuildAndAsyncSendFrame(pObject, eWebSocketOpCode, pubData, cubData);
 
+        // Legacy CD-key request (EMsg 730) is a non-proto struct message that
+        // UnpackRaw skips. Intercept it here: if we answer it locally, suppress
+        // the real send (the 785 response is delivered from the RecvPkt hook).
+        if (cubData >= sizeof(ExtendedMsgHdr)) {
+            const uint32 rawEMsg = *reinterpret_cast<const uint32*>(pubData);
+            if (!(rawEMsg & kMsgHdrProtoFlag) &&
+                static_cast<EMsg>(rawEMsg) == k_EMsgClientGetLegacyGameKey &&
+                Hooks_NetPacket_LegacyKey::HandleSend(pubData, cubData)) {
+                return true;   // answered locally; report success so Steam treats it as sent
+            }
+        }
+
         EMsg eMsg;
         const uint8 *pHdr, *pBody;
         uint32 cbHdr, cbBody;
@@ -1323,6 +1431,10 @@ namespace {
             [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, pP) != nullptr; });
 
         Hooks_NetPacket_Cloud::Drain(
+            pThis, pPacket,
+            [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, pP) != nullptr; });
+
+        Hooks_NetPacket_LegacyKey::Drain(
             pThis, pPacket,
             [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, pP) != nullptr; });
 

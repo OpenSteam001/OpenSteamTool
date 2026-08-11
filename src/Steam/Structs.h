@@ -239,6 +239,24 @@ struct ExtendedMsgHdr
 };
 #pragma pack(pop)
 
+// ── Legacy third-party CD-key ("Updating product key") ──────
+// Non-proto struct messages (EMsg 730 / 785). Wire layout mirrors SteamKit2
+// SteamLanguage: each frame is an ExtendedMsgHdr followed immediately by the
+// struct below; the response's key payload (m_cchKey bytes) trails the struct.
+#pragma pack(push,1)
+struct MsgClientGetLegacyGameKey
+{
+	uint32 m_unAppId;
+};
+
+struct MsgClientGetLegacyGameKeyResponse
+{
+	uint32  m_unAppId;
+	EResult m_eResult;
+	uint32  m_cchKey;   // length of the CD-key payload that follows this struct
+};
+#pragma pack(pop)
+
 // ── CPipeClient ────────────────────────────────────────────
 struct CPipeClient {
     void*    m_pServer;         // +0

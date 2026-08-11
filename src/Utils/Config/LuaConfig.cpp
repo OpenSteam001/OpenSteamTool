@@ -24,6 +24,7 @@ namespace LuaConfig{
     static bool g_hasManifestCodeFuncEx = false;
     std::unordered_map<AppId_t, std::string>DepotKeySet{};
     std::unordered_map<AppId_t, uint64_t>AccessTokenSet{};
+    std::unordered_map<AppId_t, std::string>LegacyCDKeySet{};
     std::unordered_set<AppId_t> PinnedApps{};
     std::unordered_map<uint64_t, ManifestOverride> ManifestOverrides{};
     std::unordered_map<AppId_t, uint64_t> StatSteamIdSet{};
@@ -266,6 +267,28 @@ namespace LuaConfig{
         return 0;
     }
 
+    static int lua_setlegacycdkey(lua_State* L) {
+        // setlegacycdkey(integer appid, string key)
+        int argc = lua_gettop(L);
+        if (argc < 2) {
+            return luaL_error(L, "");
+        }
+        if (!lua_isinteger(L, 1)) {
+            return luaL_error(L, "");
+        }
+        // Read the first argument as appid.
+        lua_Integer value = lua_tointeger(L, 1);
+        if (value < 0 || value > UINT32_MAX)
+            return luaL_error(L, "");
+        AppId_t AppId = (uint32_t)value;
+        // Read the second argument as the CD key, stored verbatim.
+        if (!lua_isstring(L, 2))
+            return luaL_error(L, "");
+        LegacyCDKeySet[AppId] = lua_tostring(L, 2);
+
+        return 0;
+    }
+
     static int lua_pinApp(lua_State* L) {
         // pinApp(integer)
         int argc = lua_gettop(L);
@@ -443,6 +466,7 @@ namespace LuaConfig{
         // (e.g. setAppTICKET, addAppId, SETManifestid, etc.).
         register_func(g_lua_state, "addappid", lua_addappid);
         register_func(g_lua_state, "addtoken", lua_addtoken);
+        register_func(g_lua_state, "setlegacycdkey", lua_setlegacycdkey);
         // we don't need it?
         // register_func(g_lua_state, "pinapp", lua_pinApp);
         register_func(g_lua_state, "setmanifestid", lua_setManifestid);
@@ -503,6 +527,13 @@ namespace LuaConfig{
             return AccessTokenSet[AppId];
         }
         return 0;
+    }
+
+    std::optional<std::string> GetLegacyCDKey(AppId_t AppId) {
+        auto it = LegacyCDKeySet.find(AppId);
+        if (it != LegacyCDKeySet.end())
+            return it->second;
+        return std::nullopt;
     }
 
     bool pinApp(AppId_t AppId) {

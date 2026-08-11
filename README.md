@@ -56,6 +56,9 @@
 
 ### Compatible with games protected by Denuvo and SteamStub
 - SteamStub-only games do not require configuring `AppTicket`. OpenSteamTool can reuse Steam's local ConfigStore ticket and forge the requested AppId through a SteamDRMP off-by-four ticket parsing vulnerability, without injecting into the game process.
+
+### Third-party product keys ("Updating product key")
+- For titles that carry a Steam-issued third-party retail key (Ubisoft Connect, Rockstar, etc.), OpenSteamTool answers the client's legacy key request locally, so the "Updating product key" step completes for added games instead of failing. Supply a real key with `setlegacycdkey(appid, "KEY")`; when none is configured a deterministic synthetic key is generated. A synthetic key satisfies Steam's local step only — titles that validate the key online still require a real one.
 - Denuvo-protected games still require explicit ticket data. OpenSteamTool stores `AppTicket` and `ETicket` through the platform credential store.
 - Use `setAppTicket(appid, "hex")` and `setETicket(appid, "hex")` in Lua config to write these values to the platform credential store automatically.
 - Denuvo verification has a 30-minute validity window. After this window expires, authorization may fail with Denuvo error code `88500005`; refresh the ticket data before retrying.
@@ -124,6 +127,9 @@ setETicket(1361510,"0100000000000000...") -- write ETicket to the credential sto
 
 setStat(1361510, "76561197960287930") -- use the specified SteamID's achievement data for appid 1361510
 -- If not configured, the stats API is used when enabled; otherwise default SteamID 76561198028121353 is used.
+
+setlegacycdkey(1361510, "ABCD-EFGH-JKMN-PQRS") -- serve this third-party retail CD key at the "Updating product key" step
+-- If not configured, a deterministic synthetic key is generated per app+account (satisfies Steam's local step only).
 ```
 
 All function names are **case-insensitive**. `setAppTicket`, `setappticket`, `SetAppticket`, `SETAPPTICKET` etc. are all equivalent. The same applies to every registered function (`addAppId`, `AddToken`, `SETManifestid`, etc.).
