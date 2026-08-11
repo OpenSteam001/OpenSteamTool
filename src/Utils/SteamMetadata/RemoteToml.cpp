@@ -7,18 +7,22 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string_view>
 #include <vector>
 
 namespace RemoteToml {
 
 namespace {
-    constexpr const char* kGithubTemplate =
-        "https://raw.githubusercontent.com/OpenSteam001/steam-monitor/"
-        "{channel}/{component}/{sha256}.toml";
-    constexpr const char* kJsdelivrTemplate =
-        "https://cdn.jsdelivr.net/gh/OpenSteam001/steam-monitor@"
-        "{channel}/{component}/{sha256}.toml";
+    // Built-in mirror chain, tried in order. Used when [remote] url_template is unset.
+    // Mirrors are independent repos/hosts (not just CDN copies of one repo).
+    constexpr const char* kDefaultTemplates[] = {
+        "https://raw.githubusercontent.com/OpenSteam001/steam-monitor/{channel}/{component}/{sha256}.toml",
+        "https://cdn.jsdelivr.net/gh/OpenSteam001/steam-monitor@{channel}/{component}/{sha256}.toml",
+        "https://raw.githubusercontent.com/madoiscool/steam-monitor/{channel}/{component}/{sha256}.toml",
+        "https://cdn.jsdelivr.net/gh/madoiscool/steam-monitor@{channel}/{component}/{sha256}.toml",
+        "https://git.lua.tools/luatools/steam-monitor/raw/branch/{channel}/{component}/{sha256}.toml",
+    };
 
     static bool HasPlaceholder(std::string_view text, std::string_view placeholder)
     {
@@ -55,17 +59,22 @@ namespace {
 
     static std::vector<std::string> BuildUrlTemplates()
     {
-        const std::string remoteUrlTemplate = Config::GetRemoteUrlTemplate();
-        if (remoteUrlTemplate.empty())
-            return { kGithubTemplate, kJsdelivrTemplate };
+        const std::vector<std::string> configured = Config::GetRemoteUrlTemplates();
+        if (configured.empty())
+            return { std::begin(kDefaultTemplates), std::end(kDefaultTemplates) };
 
-        if (!IsValidTemplate(remoteUrlTemplate)) {
-            LOG_WARN("RemoteToml: remote.url_template must contain "
-                     "{channel}, {component}, and {sha256}; remote fetch disabled");
-            return {};
+        // A configured list REPLACES the built-ins; keep only valid entries.
+        std::vector<std::string> out;
+        for (const std::string& tmpl : configured) {
+            if (IsValidTemplate(tmpl))
+                out.push_back(tmpl);
+            else
+                LOG_WARN("RemoteToml: remote.url_template entry missing "
+                         "{{channel}}/{{component}}/{{sha256}}, skipping: {}", tmpl);
         }
-
-        return { remoteUrlTemplate };
+        if (out.empty())
+            LOG_WARN("RemoteToml: no valid remote.url_template entries; remote fetch disabled");
+        return out;
     }
 } // namespace
 
@@ -116,14 +125,14 @@ Result Fetch(const Request& request)
 
         if (http.ok && http.status == 200) break;
 
-        if (http.ok && http.status == 404) {
-            LOG_WARN("RemoteToml({}/{}): mirror has no such file (HTTP 404): {}",
-                     request.channel, request.component, lastUrl);
-            break;   // all mirrors serve same data
-        }
-
+        // Mirrors are independent repos with possibly different coverage, so a 404
+        // (or any non-200) on one does NOT imply the others lack the file — always
+        // fall through to the next mirror.
         if (i + 1 < urlTemplates.size()) {
-            LOG_WARN("RemoteToml({}/{}): mirror failed ({} ok={} HTTP={}), falling back",
+            LOG_WARN("RemoteToml({}/{}): mirror failed ({} ok={} HTTP={}), trying next",
+                     request.channel, request.component, lastUrl, http.ok, http.status);
+        } else {
+            LOG_WARN("RemoteToml({}/{}): mirror failed ({} ok={} HTTP={}), no more mirrors",
                      request.channel, request.component, lastUrl, http.ok, http.status);
         }
     }

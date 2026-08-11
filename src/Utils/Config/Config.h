@@ -37,7 +37,7 @@ namespace Config {
     LogLevel GetLogLevel();
     std::string GetLogDir();
     std::vector<std::string> GetLuaPaths();
-    std::string GetRemoteUrlTemplate();
+    std::vector<std::string> GetRemoteUrlTemplates();
     InjectionSettings GetInjectionSettings();
     CloudSettings GetCloudSettings();
     bool GetStatsEnableApi();
@@ -57,8 +57,8 @@ namespace Config {
     // [lua]
     inline std::vector<std::string> luaPaths;
 
-    // [remote]
-    inline std::string remoteUrlTemplate;
+    // [remote] — one or more mirror templates, tried in order. Empty = built-in defaults.
+    inline std::vector<std::string> remoteUrlTemplates;
 
     // [stats]
     inline bool statsEnableApi = true;

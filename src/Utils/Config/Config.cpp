@@ -16,7 +16,7 @@ namespace {
         LogLevel logLevel = LogLevel::Debug;
         std::string logDir;
         std::vector<std::string> luaPaths;
-        std::string remoteUrlTemplate;
+        std::vector<std::string> remoteUrlTemplates;
         bool statsEnableApi = true;
         InjectionSettings injection;
         CloudSettings cloud;
@@ -51,7 +51,7 @@ namespace {
         logLevel               = snapshot.logLevel;
         logDir                 = snapshot.logDir;
         luaPaths               = snapshot.luaPaths;
-        remoteUrlTemplate      = snapshot.remoteUrlTemplate;
+        remoteUrlTemplates     = snapshot.remoteUrlTemplates;
         statsEnableApi         = snapshot.statsEnableApi;
         injectEnabled          = snapshot.injection.enabled;
         injectLibraryX86       = snapshot.injection.libraryX86;
@@ -85,12 +85,12 @@ namespace {
             LOG_INFO("Config file not found, using defaults");
             ApplyManifestProvider(snapshot.manifestProvider);
             LoadResult result = ApplySnapshotLocked(snapshot);
-            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={} stats.enable_api={} remote.url_template={}",
+            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={} stats.enable_api={} remote.url_templates={}",
                      ManifestClient::ActiveProviderName(),
                      ToString(GetLogLevel()),
                      (uint32_t)GetLuaPaths().size(),
                      GetStatsEnableApi(),
-                     GetRemoteUrlTemplate().empty() ? "<default>" : GetRemoteUrlTemplate());
+                     (uint32_t)GetRemoteUrlTemplates().size());
             return result;
         }
 
@@ -134,10 +134,16 @@ namespace {
                 }
             }
 
-            // [remote]
+            // [remote] — url_template may be a single string or an array of strings.
             if (auto remote = tbl["remote"].as_table()) {
-                if (auto val = (*remote)["url_template"].value<std::string>()) {
-                    snapshot.remoteUrlTemplate = *val;
+                if (auto arr = (*remote)["url_template"].as_array()) {
+                    for (auto& elem : *arr) {
+                        if (auto str = elem.value<std::string>()) {
+                            snapshot.remoteUrlTemplates.push_back(*str);
+                        }
+                    }
+                } else if (auto val = (*remote)["url_template"].value<std::string>()) {
+                    snapshot.remoteUrlTemplates.push_back(*val);
                 }
             }
 
@@ -168,12 +174,12 @@ namespace {
 
             ApplyManifestProvider(snapshot.manifestProvider);
             LoadResult result = ApplySnapshotLocked(snapshot);
-            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={} stats.enable_api={} remote.url_template={}",
+            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={} stats.enable_api={} remote.url_templates={}",
                      ManifestClient::ActiveProviderName(),
                      ToString(snapshot.logLevel),
                      (uint32_t)snapshot.luaPaths.size(),
                      snapshot.statsEnableApi,
-                     snapshot.remoteUrlTemplate.empty() ? "<default>" : snapshot.remoteUrlTemplate);
+                     (uint32_t)snapshot.remoteUrlTemplates.size());
             return result;
 
         } catch (const toml::parse_error& e) {
@@ -222,9 +228,9 @@ namespace {
         return luaPaths;
     }
 
-    std::string GetRemoteUrlTemplate() {
+    std::vector<std::string> GetRemoteUrlTemplates() {
         std::lock_guard lock(g_mutex);
-        return remoteUrlTemplate;
+        return remoteUrlTemplates;
     }
 
     InjectionSettings GetInjectionSettings() {

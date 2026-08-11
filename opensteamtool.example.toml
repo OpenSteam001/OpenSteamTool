@@ -93,9 +93,23 @@ enabled = false
 # library = "cloud_redirect.dll"
 
 [remote]
-# Optional metadata mirror. Leave unset to use GitHub with jsDelivr fallback.
-# A custom mirror replaces the built-in remote sources and must include all
-# three placeholders: {channel}, {component}, and {sha256}.
+# Optional metadata mirror(s). Leave unset to use the built-in mirror chain,
+# which is tried in order until one responds:
+#   1. https://raw.githubusercontent.com/OpenSteam001/steam-monitor/{channel}/{component}/{sha256}.toml
+#   2. https://cdn.jsdelivr.net/gh/OpenSteam001/steam-monitor@{channel}/{component}/{sha256}.toml
+#   3. https://raw.githubusercontent.com/madoiscool/steam-monitor/{channel}/{component}/{sha256}.toml
+#   4. https://cdn.jsdelivr.net/gh/madoiscool/steam-monitor@{channel}/{component}/{sha256}.toml
+#   5. https://git.lua.tools/luatools/steam-monitor/raw/branch/{channel}/{component}/{sha256}.toml
 #
+# url_template may be a single string OR an array of strings. When set, it
+# REPLACES the built-in chain (the built-ins are not tried). Each entry must
+# contain all three placeholders: {channel}, {component}, and {sha256}.
+#
+# Single custom mirror:
 # url_template = "https://your.server/{channel}/{component}/{sha256}.toml"
-# url_template = "https://fast.jsdelivr.net/gh/OpenSteam001/steam-monitor@{channel}/{component}/{sha256}.toml"
+#
+# Multiple fallbacks (tried top to bottom):
+# url_template = [
+#   "https://git.lua.tools/luatools/steam-monitor/raw/branch/{channel}/{component}/{sha256}.toml",
+#   "https://raw.githubusercontent.com/madoiscool/steam-monitor/{channel}/{component}/{sha256}.toml",
+# ]
