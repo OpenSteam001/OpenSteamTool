@@ -1,6 +1,7 @@
 #include "EticketClient.h"
 
 #include "OSTPlatform/include/Http.h"
+#include "Utils/Config/LuaConfig.h"
 #include "Utils/Logging/Log.h"
 
 #include <cstdlib>
@@ -14,11 +15,28 @@
 namespace EticketClient {
 namespace {
 
-    // On-demand mint endpoint — the Tokeer backend's /eticket route. Hardcoded so
-    // the feature is always active (no Lua opt-in). The backend POSTs
-    // {app_id, nonce(hex), existing_steam_id} and returns {eticket, appticket,
-    // steam_id}. Any failure falls back to the static credential store ticket.
-    constexpr const char* kEticketUrl = "http://31.57.38.79:8080/eticket";
+    // On-demand mint endpoint. The backend is POSTed
+    // {app_id, nonce(hex), existing_steam_id} and returns
+    // {eticket, appticket, steam_id}. Any failure falls back to the static
+    // credential-store ticket.
+    //
+    // Resolved in two steps so a build can be self-contained without putting
+    // any one deployment's backend into public source:
+    //   1. seteticketurl() in the Lua config, if called (runtime override).
+    //   2. OST_ETICKET_URL, baked in at compile time via
+    //        cmake -DOST_ETICKET_URL="https://your-host/eticket"
+    //
+    // Empty when neither is set, which disables the feature outright: the DLL
+    // never makes a network request and behaves exactly like stock OST.
+#ifndef OST_ETICKET_URL
+#define OST_ETICKET_URL ""
+#endif
+
+    std::string EticketUrl() {
+        const std::string& configured = LuaConfig::GetEticketUrl();
+        if (!configured.empty()) return configured;
+        return std::string(OST_ETICKET_URL);
+    }
 
     // Short connect timeouts so a down/unreachable backend fails fast and the
     // caller falls back; generous recv because the backend mints via a live
@@ -103,6 +121,10 @@ namespace {
     // an entry is cached, subsequent calls (ownership vs eticket, any order) share
     // it so both layers always align to the same account.
     bool EnsureFetched(AppId_t appId, std::span<const uint8_t> nonce, uint64_t existingSteamId, CachedTickets& out) {
+        // No seteticketurl() in the config: feature off, never touch the network.
+        // Callers fall back to the static credential-store ticket, i.e. stock OST.
+        if (EticketUrl().empty()) return false;
+
         {
             std::lock_guard<std::mutex> lock(g_mutex);
             if (g_noOwnerApps.count(appId)) return false;  // already known: no pool owner
@@ -135,7 +157,7 @@ namespace {
         reqBody += "}";
 
         auto r = OSTPlatform::Http::Execute(
-            L"POST", kEticketUrl,
+            L"POST", EticketUrl().c_str(),
             reqBody.data(), static_cast<uint32_t>(reqBody.size()),
             L"Content-Type: application/json\r\n",
             kResolveMs, kConnectMs, kSendMs, kRecvMs);

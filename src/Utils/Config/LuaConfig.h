@@ -47,6 +47,11 @@ namespace LuaConfig{
     // Returns true if the appid was marked via forcedenuvo(), bypassing
     // ProtectionScan in DenuvoAuth (for games where the heuristic fails).
     bool IsForcedDenuvo(AppId_t appId);
+
+    // On-demand eticket backend URL set via seteticketurl() in Lua config.
+    // Empty string means the feature is disabled and EticketClient falls
+    // back to the static credential-store ticket (original behaviour).
+    const std::string& GetEticketUrl();
 }
 
 #endif // LUACONFIG_H
