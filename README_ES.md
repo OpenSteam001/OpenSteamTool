@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/logo-animated.svg" width="180" alt="Logo de OpenSteamTool">
+  <img src="docs/bst.png" width="180" alt="Logo de BetterSteamTools">
 
   <h1>OpenSteamTool</h1>
 
