@@ -1,0 +1,91 @@
+name: Delete version
+run-name: Delete ${{ inputs.version }}
+
+# Manually remove a published version from BOTH the GitHub Release (and its tag) and
+# the `updates` branch used by the in-DLL self-updater. If the removed version is the
+# one latest.toml points at, the pointer is repointed to the newest remaining version
+# (by publish order) or dropped if none remain.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact version/tag to delete (e.g. v1.0.0 or nightly-20260812-abc1234)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest   # only gh + git needed, no build
+    steps:
+      - name: Delete GitHub release + tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver='${{ inputs.version }}'
+          if gh release view "$ver" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$ver" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+            echo "Deleted release + tag: $ver"
+          else
+            echo "No release named '$ver'; attempting to delete a dangling tag."
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              --delete "refs/tags/$ver" 2>/dev/null && echo "Deleted tag $ver" || echo "No tag $ver."
+          fi
+
+      - name: Remove from updates branch
+        shell: bash
+        run: |
+          ver='${{ inputs.version }}'
+          repo="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+
+          if ! git clone --branch updates --single-branch "$repo" pub 2>/dev/null; then
+            echo "No 'updates' branch; nothing to remove."; exit 0
+          fi
+          cd pub
+
+          if [ ! -d "opensteamtool/$ver" ]; then
+            echo "opensteamtool/$ver not present on updates branch; nothing to remove."
+          else
+            git rm -r "opensteamtool/$ver"
+            echo "Removed opensteamtool/$ver from updates branch."
+          fi
+
+          # Repoint latest.toml only if it named the version we just removed.
+          cur="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"(.*)".*/\1/p' opensteamtool/latest.toml 2>/dev/null)"
+          if [ "$cur" = "$ver" ]; then
+            # Newest remaining = most recently ADDED version dir that still exists.
+            newest=""
+            while read -r v; do
+              if [ -n "$v" ] && [ -d "opensteamtool/$v" ]; then newest="$v"; break; fi
+            done < <(git log --diff-filter=A --pretty=format: --name-only -- 'opensteamtool/*/OpenSteamTool.dll' \
+                     | sed -nE 's#^opensteamtool/([^/]+)/OpenSteamTool\.dll$#\1#p')
+
+            if [ -n "$newest" ]; then
+              hash="$(cat "opensteamtool/$newest/OpenSteamTool.dll.sha256")"
+              {
+                echo "version = \"$newest\""
+                echo "path    = \"opensteamtool/$newest/OpenSteamTool.dll\""
+                echo "sha256  = \"$hash\""
+              } > opensteamtool/latest.toml
+              echo "Repointed latest.toml -> $newest"
+            else
+              rm -f opensteamtool/latest.toml
+              echo "No versions remain; removed latest.toml (auto-update will find nothing)."
+            fi
+          fi
+
+          if git diff --cached --quiet && git diff --quiet; then
+            echo "No changes to commit."; exit 0
+          fi
+          git add -A
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com \
+            commit -m "delete opensteamtool $ver"
+          git push origin updates
+
+      - name: Purge jsDelivr cache for pointer
+        shell: bash
+        run: |
+          curl -s "https://purge.jsdelivr.net/gh/madoiscool/BetterSteamTools@updates/opensteamtool/latest.toml" \
+            >/dev/null || echo "jsDelivr purge failed (non-fatal)."

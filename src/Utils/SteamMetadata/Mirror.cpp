@@ -34,8 +34,11 @@ std::optional<std::string> Fetch(std::string_view relPath)
         const std::string url = Expand(kBaseTemplates[i], relPath);
         LOG_INFO("Mirror: fetching {}", url);
 
+        // Raise the body cap well above the default: updates carry a multi-MB DLL,
+        // not just a small TOML pointer. (AppUpdater still range-checks the DLL size.)
         OSTPlatform::Http::Result http =
-            OSTPlatform::Http::Execute(L"GET", url.c_str(), nullptr, 0, nullptr);
+            OSTPlatform::Http::Execute(L"GET", url.c_str(), nullptr, 0, nullptr,
+                                       5000, 5000, 10000, 10000, 16u * 1024 * 1024);
 
         if (http.ok && http.status == 200 && !http.body.empty())
             return std::move(http.body);

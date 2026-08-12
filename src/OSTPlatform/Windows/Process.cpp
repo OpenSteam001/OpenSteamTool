@@ -372,16 +372,18 @@ bool LaunchDetachedHidden(const std::string& commandLine) {
     si.dwFlags     = STARTF_USESHOWWINDOW;
     si.wShowWindow = SW_HIDE;
 
-    // The helper must survive the caller exiting. DETACHED_PROCESS drops the shared
-    // console; CREATE_NO_WINDOW suppresses any new one. Try CREATE_BREAKAWAY_FROM_JOB
-    // first so a kill-on-close job (if Steam is in one) can't take the helper down with
-    // it, then fall back if the job forbids breakaway.
+    // Run the helper in a hidden console (CREATE_NO_WINDOW — no flash, no window). It
+    // still outlives the caller: process lifetimes are independent. Do NOT combine
+    // DETACHED_PROCESS with CREATE_NO_WINDOW — they are contradictory console flags and
+    // leave the helper's own child processes with broken handles. Try
+    // CREATE_BREAKAWAY_FROM_JOB first so a kill-on-close job (if Steam is in one) can't
+    // take the helper down, then fall back if the job forbids breakaway.
     for (DWORD extra : { DWORD{CREATE_BREAKAWAY_FROM_JOB}, DWORD{0} }) {
         std::vector<wchar_t> cmd = buffer;   // fresh mutable copy per attempt
         PROCESS_INFORMATION pi{};
         const BOOL ok = CreateProcessW(
             nullptr, cmd.data(), nullptr, nullptr, FALSE,
-            CREATE_NO_WINDOW | DETACHED_PROCESS | extra,
+            CREATE_NO_WINDOW | extra,
             nullptr, nullptr, &si, &pi);
         if (ok) {
             CloseHandle(pi.hThread);
