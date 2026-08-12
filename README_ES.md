@@ -149,7 +149,7 @@ timeout_recv_ms    = 10000
 enable_api = true
 
 # Directorios adicionales de configuración de Lua (opcional).
-# Los archivos se cargan después de la carpeta predeterminada <Steam>/config/lua.
+# Los archivos se cargan después de la carpeta predeterminada <Steam>/config/stplug-in.
 # La carpeta predeterminada siempre se carga al final para que los archivos del usuario tengan prioridad.
 [lua]
 paths = []

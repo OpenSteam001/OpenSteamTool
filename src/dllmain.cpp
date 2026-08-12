@@ -26,7 +26,7 @@ bool InitializeSteamComponents()
     sprintf_s(SteamclientPath, kRuntimePathCapacity, "%s\\steamclient64.dll",  SteamInstallPath);
     sprintf_s(SteamUIPath,     kRuntimePathCapacity, "%s\\steamui.dll",        SteamInstallPath);
     sprintf_s(DiversionPath,   kRuntimePathCapacity, "%s\\bin\\diversion.dll", SteamInstallPath);
-    sprintf_s(LuaDir,          kRuntimePathCapacity, "%s\\config\\lua",        SteamInstallPath);
+    sprintf_s(LuaDir,          kRuntimePathCapacity, "%s\\config\\stplug-in",  SteamInstallPath);
     sprintf_s(ConfigPath,      kRuntimePathCapacity, "%s\\opensteamtool.toml", SteamInstallPath);
     
     client_hModule = OSTPlatform::DynamicLibrary::Load(SteamclientPath);
@@ -72,8 +72,8 @@ static uint32_t InitThread(OSTPlatform::DynamicLibrary::ModuleHandle selfModule)
     // IPC method metadata (funcHash, fencepost, argc, ...)
     IPCLoader::Load(SteamclientPath);
 
-    std::vector<std::string> watchDirs = Config::GetLuaPaths();
-    watchDirs.push_back(std::string(LuaDir));
+    std::vector<std::string> watchDirs =
+        LuaConfig::MergeWatchDirs(Config::GetLuaPaths(), std::string(LuaDir));
     for (const auto& dir : watchDirs)
         LuaConfig::ParseDirectory(dir);
 

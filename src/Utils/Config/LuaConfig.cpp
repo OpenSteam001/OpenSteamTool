@@ -7,8 +7,10 @@
 
 #include <lua.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <unordered_set>
@@ -811,6 +813,40 @@ namespace LuaConfig{
     }
 
     // ── directory scanner ────────────────────────────────────────
+    std::vector<std::string> MergeWatchDirs(const std::vector<std::string>& configured,
+                                            const std::string& defaultDir) {
+        namespace fs = std::filesystem;
+
+        // Canonical, case-folded key for a directory so relative and absolute spellings
+        // of the same location compare equal. weakly_canonical resolves against the
+        // current working directory (Steam's install root at runtime), matching how the
+        // paths are later opened.
+        auto key = [](const std::string& p) -> std::string {
+            std::error_code ec;
+            fs::path c = fs::weakly_canonical(p, ec);
+            if (ec || c.empty()) c = fs::absolute(fs::path(p), ec);
+            if (ec || c.empty()) c = fs::path(p).lexically_normal();
+            std::string s = c.string();
+            std::transform(s.begin(), s.end(), s.begin(),
+                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            return s;
+        };
+
+        std::vector<std::string> out;
+        std::vector<std::string> seen;
+        auto add = [&](const std::string& dir) {
+            if (dir.empty()) return;
+            const std::string k = key(dir);
+            if (std::find(seen.begin(), seen.end(), k) != seen.end()) return;
+            seen.push_back(k);
+            out.push_back(dir);
+        };
+
+        for (const auto& d : configured) add(d);
+        add(defaultDir);   // appended only if it isn't already covered above
+        return out;
+    }
+
     void ParseDirectory(const std::string& directory) {
         if (!Initialize()) return;
 

@@ -12,7 +12,7 @@ level = "debug"
 #   "opensteamtool" → https://manifest.opensteamtool.com/{gid}   (default)
 #   "wudrm"         → http://gmrc.wudrm.com/manifest/{gid} (recommended for China users)
 #   "steamrun"      → https://manifest.steam.run/api/manifest/{gid}
-# If <Steam>/config/lua/manifest.lua defines fetch_manifest_code(gid) or
+# If <Steam>/config/stplug-in/manifest.lua defines fetch_manifest_code(gid) or
 # fetch_manifest_code_ex(app_id, depot_id, gid), those Lua functions take
 # priority over the url setting below.
 #
@@ -69,7 +69,7 @@ enable_api = true
 enabled = true
 
 # Additional Lua config directories (optional).
-# Files are loaded after the default <Steam>/config/lua folder.
+# Files are loaded after the default <Steam>/config/stplug-in folder.
 # The default folder is always loaded last so user files take priority.
 # Example — load a custom directory on another drive:
 #   [lua]

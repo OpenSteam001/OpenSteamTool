@@ -161,7 +161,7 @@ timeout_recv_ms    = 10000
 enable_api = true
 
 # Additional Lua config directories (optional).
-# Files are loaded after the default <Steam>/config/lua folder.
+# Files are loaded after the default <Steam>/config/stplug-in folder.
 # The default folder is always loaded last so user files take priority.
 [lua]
 paths = []

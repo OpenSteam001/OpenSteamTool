@@ -46,9 +46,7 @@ bool ContainsConfigChange(
 }
 
 std::vector<std::string> BuildLuaWatchDirs() {
-    std::vector<std::string> watchDirs = Config::GetLuaPaths();
-    watchDirs.push_back(g_defaultLuaDir);
-    return watchDirs;
+    return LuaConfig::MergeWatchDirs(Config::GetLuaPaths(), g_defaultLuaDir);
 }
 
 void RestartLuaWatcher() {

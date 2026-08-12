@@ -156,7 +156,7 @@ timeout_recv_ms    = 10000
 enable_api = true
 
 # 额外的 Lua 配置目录（可选）
-# 文件在默认 <Steam>/config/lua 文件夹之后加载
+# 文件在默认 <Steam>/config/stplug-in 文件夹之后加载
 # 默认文件夹总是最后加载，因此用户文件优先级更高
 [lua]
 paths = []

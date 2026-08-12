@@ -37,6 +37,13 @@ namespace LuaConfig{
     void ParseDirectory(const std::string& directory);
     void ReloadDirectories(const std::vector<std::string>& directories, bool clearPendingAdditions = false);
 
+    // Merge the user-configured Lua directories with the built-in default, dropping any
+    // entry that resolves to the same filesystem location (so a relative config entry
+    // like "config/stplug-in" that equals the absolute default folder is not loaded
+    // twice). Configured paths keep their order; the default is appended only if new.
+    std::vector<std::string> MergeWatchDirs(const std::vector<std::string>& configured,
+                                            const std::string& defaultDir);
+
     bool HasManifestCodeFunc();
     bool CallManifestFetchCode(uint64_t gid, uint64_t* outCode);
 
