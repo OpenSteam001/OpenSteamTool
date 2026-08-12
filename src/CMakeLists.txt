@@ -113,10 +113,12 @@ add_library(OpenSteamTool SHARED
     Utils/Logging/Log.cpp
     Utils/SteamMetadata/IPCLoader.cpp
     Utils/SteamMetadata/ManifestClient.cpp
+    Utils/SteamMetadata/Mirror.cpp
     Utils/SteamMetadata/PatternLoader.cpp
     Utils/SteamMetadata/RemoteToml.cpp
     Utils/SteamMetadata/StatsClient.cpp
     Utils/SteamMetadata/SteamDiagnostics.cpp
+    Utils/Update/AppUpdater.cpp
 
     # Pipe subsystem: generic handshake registry + ProcessInspector core, plus
     # self-contained features that own their primitives.

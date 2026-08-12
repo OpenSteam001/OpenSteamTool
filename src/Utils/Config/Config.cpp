@@ -18,6 +18,7 @@ namespace {
         std::vector<std::string> luaPaths;
         std::vector<std::string> remoteUrlTemplates;
         bool statsEnableApi = true;
+        bool updateEnabled = true;
         InjectionSettings injection;
         CloudSettings cloud;
     };
@@ -53,6 +54,7 @@ namespace {
         luaPaths               = snapshot.luaPaths;
         remoteUrlTemplates     = snapshot.remoteUrlTemplates;
         statsEnableApi         = snapshot.statsEnableApi;
+        updateEnabled          = snapshot.updateEnabled;
         injectEnabled          = snapshot.injection.enabled;
         injectLibraryX86       = snapshot.injection.libraryX86;
         injectLibraryX64       = snapshot.injection.libraryX64;
@@ -154,6 +156,13 @@ namespace {
                 }
             }
 
+            // [update]
+            if (auto update = tbl["update"].as_table()) {
+                if (auto val = (*update)["enabled"].value<bool>()) {
+                    snapshot.updateEnabled = *val;
+                }
+            }
+
             // [inject]
             if (auto inject = tbl["inject"].as_table()) {
                 if (auto val = (*inject)["enabled"].value<bool>())
@@ -245,6 +254,11 @@ namespace {
     bool GetStatsEnableApi() {
         std::lock_guard lock(g_mutex);
         return statsEnableApi;
+    }
+
+    bool GetUpdateEnabled() {
+        std::lock_guard lock(g_mutex);
+        return updateEnabled;
     }
 
     CloudSettings GetCloudSettings() {

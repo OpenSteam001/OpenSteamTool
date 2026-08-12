@@ -62,6 +62,12 @@ timeout_recv_ms    = 10000
 # Priority: setStat > stats API when enabled and valid > hardcoded preset SteamID.
 enable_api = true
 
+[update]
+# Check for a newer BetterSteamTools build on startup. When a newer build is
+# found it is downloaded, verified (SHA-256) and staged next to Steam; the new
+# DLL loads on the next Steam launch. Set to false to disable the check entirely.
+enabled = true
+
 # Additional Lua config directories (optional).
 # Files are loaded after the default <Steam>/config/lua folder.
 # The default folder is always loaded last so user files take priority.

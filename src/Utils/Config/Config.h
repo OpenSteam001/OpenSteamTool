@@ -41,6 +41,7 @@ namespace Config {
     InjectionSettings GetInjectionSettings();
     CloudSettings GetCloudSettings();
     bool GetStatsEnableApi();
+    bool GetUpdateEnabled();
 
     // [manifest] — provider selection lives in ManifestClient (table-driven).
     inline uint32_t manifestTimeoutResolve = 5000;
@@ -62,6 +63,9 @@ namespace Config {
 
     // [stats]
     inline bool statsEnableApi = true;
+
+    // [update] - self-update check on startup (staged for next Steam launch).
+    inline bool updateEnabled = true;
 
     // [inject] - optional library injection into game processes.
     inline bool injectEnabled = false;

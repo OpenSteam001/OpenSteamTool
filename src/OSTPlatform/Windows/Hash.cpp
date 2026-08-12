@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <bcrypt.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -14,6 +15,17 @@ namespace {
 
 uint32_t StatusCode(NTSTATUS status) {
     return static_cast<uint32_t>(status);
+}
+
+std::string HexEncode(const std::vector<uint8_t>& bytes) {
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(bytes.size() * 2);
+    for (uint8_t b : bytes) {
+        result += kHex[b >> 4];
+        result += kHex[b & 0xF];
+    }
+    return result;
 }
 
 } // namespace
@@ -102,14 +114,84 @@ std::string Sha256OfFile(const std::filesystem::path& path) {
     }
     cleanup();
 
-    static constexpr char kHex[] = "0123456789abcdef";
-    std::string result;
-    result.reserve(hashSize * 2);
-    for (uint8_t b : hashBuf) {
-        result += kHex[b >> 4];
-        result += kHex[b & 0xF];
+    return HexEncode(hashBuf);
+}
+
+std::string Sha256OfBuffer(const void* data, size_t size) {
+    if (!data && size != 0) {
+        OSTP_LOG_WARN("Sha256OfBuffer: null data with non-zero size ({})", size);
+        return {};
     }
-    return result;
+
+    BCRYPT_ALG_HANDLE hAlg = nullptr;
+    NTSTATUS status = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
+    if (!BCRYPT_SUCCESS(status)) {
+        OSTP_LOG_WARN("Sha256OfBuffer: BCryptOpenAlgorithmProvider failed (status=0x{:08X})",
+                      StatusCode(status));
+        return {};
+    }
+
+    BCRYPT_HASH_HANDLE hHash = nullptr;
+    auto cleanup = [&] {
+        if (hHash) BCryptDestroyHash(hHash);
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+    };
+
+    DWORD cbData = 0;
+    DWORD hashObjSize = 0;
+    status = BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&hashObjSize),
+                               sizeof(DWORD), &cbData, 0);
+    if (!BCRYPT_SUCCESS(status) || hashObjSize == 0) {
+        OSTP_LOG_WARN("Sha256OfBuffer: BCryptGetProperty(BCRYPT_OBJECT_LENGTH) failed (status=0x{:08X})",
+                      StatusCode(status));
+        cleanup();
+        return {};
+    }
+    std::vector<uint8_t> hashObj(hashObjSize);
+
+    DWORD hashSize = 0;
+    status = BCryptGetProperty(hAlg, BCRYPT_HASH_LENGTH, reinterpret_cast<PUCHAR>(&hashSize),
+                               sizeof(DWORD), &cbData, 0);
+    if (!BCRYPT_SUCCESS(status) || hashSize == 0) {
+        OSTP_LOG_WARN("Sha256OfBuffer: BCryptGetProperty(BCRYPT_HASH_LENGTH) failed (status=0x{:08X})",
+                      StatusCode(status));
+        cleanup();
+        return {};
+    }
+    std::vector<uint8_t> hashBuf(hashSize);
+
+    status = BCryptCreateHash(hAlg, &hHash, hashObj.data(), hashObjSize, nullptr, 0, 0);
+    if (!BCRYPT_SUCCESS(status)) {
+        OSTP_LOG_WARN("Sha256OfBuffer: BCryptCreateHash failed (status=0x{:08X})", StatusCode(status));
+        cleanup();
+        return {};
+    }
+
+    // BCryptHashData takes a ULONG length; feed the buffer in bounded chunks so a
+    // >4 GiB input can never truncate the count (also keeps parity with the file path).
+    const auto* cursor = static_cast<const uint8_t*>(data);
+    size_t remaining = size;
+    while (remaining != 0) {
+        const ULONG chunk = static_cast<ULONG>(std::min<size_t>(remaining, 0x40000000));
+        status = BCryptHashData(hHash, const_cast<PUCHAR>(cursor), chunk, 0);
+        if (!BCRYPT_SUCCESS(status)) {
+            OSTP_LOG_WARN("Sha256OfBuffer: BCryptHashData failed (status=0x{:08X})", StatusCode(status));
+            cleanup();
+            return {};
+        }
+        cursor    += chunk;
+        remaining -= chunk;
+    }
+
+    status = BCryptFinishHash(hHash, hashBuf.data(), hashSize, 0);
+    if (!BCRYPT_SUCCESS(status)) {
+        OSTP_LOG_WARN("Sha256OfBuffer: BCryptFinishHash failed (status=0x{:08X})", StatusCode(status));
+        cleanup();
+        return {};
+    }
+    cleanup();
+
+    return HexEncode(hashBuf);
 }
 
 } // namespace OSTPlatform::Hash

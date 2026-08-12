@@ -25,6 +25,54 @@ jobs:
       - name: Build Release
         run: cmake --build build --config Release
 
+      # Publish the built DLL + version pointer to the orphan `updates` branch so the
+      # in-DLL self-updater can fetch it over the mirror chain (raw → jsDelivr →
+      # lua.tools). Pushes to this same repo with the built-in GITHUB_TOKEN.
+      - name: Publish update to updates branch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $ver  = "${{ github.event.inputs.version }}"
+          $repo = "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          $hash = (Get-FileHash ".\build\Release\OpenSteamTool.dll" -Algorithm SHA256).Hash.ToLower()
+
+          git clone --branch updates --single-branch $repo pub
+          if (-not (Test-Path pub/.git)) {   # first run: create the orphan branch
+            Remove-Item -Recurse -Force pub -ErrorAction SilentlyContinue
+            git clone $repo pub
+            Push-Location pub
+            git checkout --orphan updates
+            git rm -rf . 2>$null
+            Pop-Location
+          }
+
+          $dir = "pub/opensteamtool/$ver"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item ".\build\Release\OpenSteamTool.dll" "$dir/OpenSteamTool.dll" -Force
+          [IO.File]::WriteAllText((Resolve-Path $dir).Path + "/OpenSteamTool.dll.sha256", $hash)
+          $lines = @(
+            "version = `"$ver`""
+            "path    = `"opensteamtool/$ver/OpenSteamTool.dll`""
+            "sha256  = `"$hash`""
+          )
+          Set-Content -Path "pub/opensteamtool/latest.toml" -Value $lines -Encoding ascii
+
+          Push-Location pub
+          git add -A
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -m "opensteamtool $ver"
+          git push origin updates
+          Pop-Location
+
+      # latest.toml lives at a mutable branch path, so nudge jsDelivr to drop its cached
+      # copy. Versioned DLL paths are immutable and never need purging.
+      - name: Purge jsDelivr cache for pointer
+        shell: pwsh
+        run: |
+          try {
+            Invoke-WebRequest -UseBasicParsing `
+              "https://purge.jsdelivr.net/gh/madoiscool/BetterSteamTools@updates/opensteamtool/latest.toml" | Out-Null
+          } catch { Write-Host "jsDelivr purge failed (non-fatal): $_" }
+
       - name: Build Debug
         run: cmake --build build --config Debug
 

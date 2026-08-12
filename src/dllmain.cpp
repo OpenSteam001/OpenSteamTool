@@ -1,14 +1,18 @@
 #include "dllmain.h"
 #include "Hook/HookManager.h"
+#include "Utils/Config/Config.h"
 #include "Utils/Config/ConfigFileWatcher.h"
 #include "Utils/Config/LuaFileWatcher.h"
 #include "Utils/CloudRedirect/CloudRedirectHost.h"
 #include "Utils/SteamMetadata/IPCLoader.h"
 #include "Utils/SteamMetadata/PatternLoader.h"
 #include "Utils/SteamMetadata/SteamDiagnostics.h"
+#include "Utils/Update/AppUpdater.h"
+#include "OSTPlatform/include/Dialog.h"
 #include "OSTPlatform/include/DynamicLibrary.h"
 #include "OSTPlatform/include/Thread.h"
 
+#include <string>
 #include <windows.h>
 
 // prepare key runtime paths.
@@ -85,6 +89,26 @@ static uint32_t InitThread(OSTPlatform::DynamicLibrary::ModuleHandle selfModule)
     // Optional Steam Cloud save redirection (CloudRedirect). No-op unless
     // [cloud].enabled is set and cloud_redirect.dll is present.
     CloudRedirectHost::Initialize(SteamInstallPath);
+
+    // Optional self-update check. Runs on its own detached thread so the network
+    // round-trip never delays hook installation; a staged DLL applies next launch.
+    if (Config::GetUpdateEnabled()) {
+        OSTPlatform::Thread::StartDetached([] () -> uint32_t {
+            const std::string self = std::string(SteamInstallPath) + "\\OpenSteamTool.dll";
+            AppUpdater::CleanupStagedBackup(self);
+
+            const AppUpdater::CheckResult upd = AppUpdater::Check();
+            if (!upd.updateAvailable) return 0;
+            if (!AppUpdater::DownloadAndStage(upd, self)) return 0;
+
+            const bool restart = OSTPlatform::Dialog::ShowConfirm(
+                "BetterSteamTools Updated!",
+                upd.oldVersion + " -> " + upd.newVersion +
+                "\n\nRestart Steam now to apply?");
+            if (restart) AppUpdater::RestartSteam();
+            return 0;
+        });
+    }
 
     LOG_INFO("OpenSteamTool init complete");
     return 0;
