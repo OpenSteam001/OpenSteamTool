@@ -115,11 +115,13 @@ namespace {
             // SAME account instead of risking a different pool pick.
             const uint64_t existingSteamId = AppTicket::ExtractSteamIdFromTicketBytes(
                 AppTicket::GetAppOwnershipTicketFromCredentialStore(appId));
-            // Only mint on-demand etickets for games explicitly marked forcedenuvo —
-            // those are the strict Denuvo titles that require a nonce-bound ticket.
-            // For normally-detected Denuvo games the minted ticket carries the wrong
-            // SteamID (pool account vs spoofed user) and Denuvo rejects it (error 54).
-            if (LuaConfig::IsForcedDenuvo(appId)) {
+            // Mint a fresh eticket whenever the credential store already has a ticket
+            // for this app (existingSteamId != 0). The minted eticket is pinned to
+            // the same pool account via existingSteamId, which matches GetSteamID's
+            // spoof (also sourced from the credential store via CredentialStoreThenForge)
+            // — no error-54 risk. This fixes error 05 for games launched more than
+            // 30 min after activation (stored ticket expired, fresh mint is current).
+            if (existingSteamId != 0) {
                 if (auto fresh = EticketClient::FetchFreshEticket(appId, nonce, existingSteamId)) {
                     std::lock_guard<std::mutex> lock(g_freshEticketMutex);
                     g_freshEticket[appId] = std::move(*fresh);

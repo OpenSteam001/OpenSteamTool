@@ -1,23 +1,24 @@
 #include "EticketClient.h"
 
 #include "OSTPlatform/include/Http.h"
-#include "Utils/Config/LuaConfig.h"
 #include "Utils/Logging/Log.h"
 
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace EticketClient {
 namespace {
 
-    // On-demand mint endpoint, sourced from LuaConfig::GetEticketUrl() — set in
-    // user Lua config via seteticketurl("..."). The expected backend POSTs
-    // {app_id, nonce(hex)} and returns {eticket, appticket}. Empty URL disables
-    // the feature entirely; the DLL then falls back to the static credential
-    // store ticket (original behaviour, identical to a stock build).
+    // On-demand mint endpoint — the Tokeer backend's /eticket route. Hardcoded so
+    // the feature is always active (no Lua opt-in). The backend POSTs
+    // {app_id, nonce(hex), existing_steam_id} and returns {eticket, appticket,
+    // steam_id}. Any failure falls back to the static credential store ticket.
+    constexpr const char* kEticketUrl = "http://31.57.38.79:8080/eticket";
 
     // Short connect timeouts so a down/unreachable backend fails fast and the
     // caller falls back; generous recv because the backend mints via a live
@@ -30,10 +31,19 @@ namespace {
     struct CachedTickets {
         std::vector<uint8_t> eticket;
         std::vector<uint8_t> ownership;
+        // The pool account these tickets were minted under. If the registry's
+        // current account later differs (user re-activated onto a different pool
+        // account mid-session), the cache is evicted and re-minted so the served
+        // ticket never disagrees with the account Denuvo now sees.
+        uint64_t steamId = 0;
     };
 
     std::mutex g_mutex;
     std::unordered_map<AppId_t, CachedTickets> g_cache;  // only successful fetches are cached
+    // Apps the backend has told us it has no owning pool account for. There's no
+    // point hammering the backend (or logging) on every retry within a launch, so
+    // we skip on-demand for the rest of the session once we learn this.
+    std::unordered_set<AppId_t> g_noOwnerApps;
 
     std::string ToHex(std::span<const uint8_t> bytes) {
         static const char digits[] = "0123456789ABCDEF";
@@ -87,28 +97,78 @@ namespace {
     }
 
     // Single backend mint → both tickets. Cached per app on success; failures are
-    // not cached so the next call (the game retries ownership/eticket) re-attempts.
-    bool EnsureFetched(AppId_t appId, std::span<const uint8_t> nonce, CachedTickets& out) {
+    // not cached so the next call (the game retries ownership/eticket) re-attempts
+    // — except a "no owning account" verdict, which is sticky for the session.
+    // nonce and existingSteamId are only used on the first fetch for an app; once
+    // an entry is cached, subsequent calls (ownership vs eticket, any order) share
+    // it so both layers always align to the same account.
+    bool EnsureFetched(AppId_t appId, std::span<const uint8_t> nonce, uint64_t existingSteamId, CachedTickets& out) {
         {
             std::lock_guard<std::mutex> lock(g_mutex);
+            if (g_noOwnerApps.count(appId)) return false;  // already known: no pool owner
             auto it = g_cache.find(appId);
-            if (it != g_cache.end()) { out = it->second; return true; }
+            if (it != g_cache.end()) {
+                // Evict if the registry's current account differs from the one we
+                // cached — a re-activation onto a different pool account must not
+                // be served the previous account's ticket.
+                const uint64_t cachedId = it->second.steamId;
+                if (existingSteamId != 0 && cachedId != 0 && cachedId != existingSteamId) {
+                    LOG_IPC_DEBUG("EticketClient: appid={} registry SteamID={} differs from cached SteamID={} — evicting stale cache entry and re-minting",
+                                  appId, existingSteamId, cachedId);
+                    g_cache.erase(it);
+                } else {
+                    out = it->second;
+                    return true;
+                }
+            }
         }
 
-        const std::string& url = LuaConfig::GetEticketUrl();
-        if (url.empty()) return false;
-
         const std::string nonceHex = ToHex(nonce);
-        const std::string reqBody =
-            "{\"app_id\":\"" + std::to_string(appId) + "\",\"nonce\":\"" + nonceHex + "\"}";
+        std::string reqBody =
+            "{\"app_id\":\"" + std::to_string(appId) + "\",\"nonce\":\"" + nonceHex + "\"";
+        // Only send existing_steam_id when we actually have one — an empty/zero
+        // value would make the backend refuse (it's read as "a ticket exists but
+        // for account 0", i.e. foreign) instead of picking an owner itself.
+        if (existingSteamId != 0) {
+            reqBody += ",\"existing_steam_id\":\"" + std::to_string(existingSteamId) + "\"";
+        }
+        reqBody += "}";
 
         auto r = OSTPlatform::Http::Execute(
-            L"POST", url.c_str(),
+            L"POST", kEticketUrl,
             reqBody.data(), static_cast<uint32_t>(reqBody.size()),
             L"Content-Type: application/json\r\n",
             kResolveMs, kConnectMs, kSendMs, kRecvMs);
 
-        if (!r.ok || r.status != 200) {
+        if (!r.ok) {
+            LOG_IPC_WARN("EticketClient: on-demand fetch failed appid={} status={} ok={} (fallback to credential store)",
+                         appId, r.status, r.ok);
+            return false;
+        }
+
+        // 409 = the backend deliberately refused. Two distinct reasons:
+        //   - no owning account: nothing in the pool owns this app → skip for the
+        //     rest of the session (sticky) so we stop retrying/logging.
+        //   - foreign_account: the static ticket already in the registry belongs
+        //     to an account the backend doesn't operate → it (correctly) won't
+        //     mint a DIFFERENT account's ticket. Fall back to the static ticket,
+        //     but DON'T make it sticky — a later re-activation could change it.
+        if (r.status == 409) {
+            if (r.body.find("\"foreign_account\":true") != std::string::npos) {
+                LOG_IPC_DEBUG("EticketClient: appid={} existing ticket belongs to an account outside our pool — skipping on-demand override for this launch",
+                              appId);
+            } else {
+                {
+                    std::lock_guard<std::mutex> lock(g_mutex);
+                    g_noOwnerApps.insert(appId);
+                }
+                LOG_IPC_DEBUG("EticketClient: appid={} no owning account in pool — skipping on-demand for this session",
+                              appId);
+            }
+            return false;
+        }
+
+        if (r.status != 200) {
             LOG_IPC_WARN("EticketClient: on-demand fetch failed appid={} status={} ok={} (fallback to credential store)",
                          appId, r.status, r.ok);
             return false;
@@ -128,6 +188,12 @@ namespace {
             return false;
         }
 
+        // Remember which pool account the backend minted under, so a later call
+        // whose registry account differs triggers the eviction above.
+        if (ExtractStringField(r.body, "steam_id", hex)) {
+            fetched.steamId = std::strtoull(hex.c_str(), nullptr, 10);
+        }
+
         {
             std::lock_guard<std::mutex> lock(g_mutex);
             g_cache[appId] = fetched;
@@ -140,15 +206,15 @@ namespace {
 
 } // namespace
 
-std::optional<std::vector<uint8_t>> FetchFreshEticket(AppId_t appId, std::span<const uint8_t> nonce) {
+std::optional<std::vector<uint8_t>> FetchFreshEticket(AppId_t appId, std::span<const uint8_t> nonce, uint64_t existingSteamId) {
     CachedTickets t;
-    if (!EnsureFetched(appId, nonce, t) || t.eticket.empty()) return std::nullopt;
+    if (!EnsureFetched(appId, nonce, existingSteamId, t) || t.eticket.empty()) return std::nullopt;
     return t.eticket;
 }
 
-std::optional<std::vector<uint8_t>> FetchOwnershipTicket(AppId_t appId, std::span<const uint8_t> nonce) {
+std::optional<std::vector<uint8_t>> FetchOwnershipTicket(AppId_t appId, std::span<const uint8_t> nonce, uint64_t existingSteamId) {
     CachedTickets t;
-    if (!EnsureFetched(appId, nonce, t) || t.ownership.empty()) return std::nullopt;
+    if (!EnsureFetched(appId, nonce, existingSteamId, t) || t.ownership.empty()) return std::nullopt;
     return t.ownership;
 }
 

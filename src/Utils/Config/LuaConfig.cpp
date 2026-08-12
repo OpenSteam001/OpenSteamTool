@@ -32,9 +32,6 @@ namespace LuaConfig{
     std::unordered_map<std::string, AppId_t> ProcessNameAppIdMap{};
     // App IDs that should bypass ProtectionScan and be treated as Denuvo games.
     std::unordered_set<AppId_t> ForcedDenuvoSet{};
-    // On-demand eticket mint endpoint, set via seteticketurl() in Lua config.
-    // Empty = disabled (EticketClient falls back to credential-store ticket).
-    std::string EticketUrl{};
 
     // Per-file tracking: which depots each .lua file contributed.
     static std::string g_currentFile;
@@ -301,16 +298,6 @@ namespace LuaConfig{
         return 0;
     }
 
-    static int lua_seteticketurl(lua_State* L) {
-        // seteticketurl("http://your-backend/eticket")
-        // Endpoint that mints fresh nonce-bound encrypted app tickets for
-        // strict Denuvo titles. Set to "" (or omit the call) to disable.
-        if (lua_gettop(L) < 1 || !lua_isstring(L, 1))
-            return luaL_error(L, "seteticketurl requires (url: string)");
-        EticketUrl = std::string(lua_tostring(L, 1));
-        return 0;
-    }
-
     static int lua_pinApp(lua_State* L) {
         // pinApp(integer)
         int argc = lua_gettop(L);
@@ -490,7 +477,6 @@ namespace LuaConfig{
         register_func(g_lua_state, "addtoken", lua_addtoken);
         register_func(g_lua_state, "addprocess", lua_addprocess);
         register_func(g_lua_state, "forcedenuvo", lua_forcedenuvo);
-        register_func(g_lua_state, "seteticketurl", lua_seteticketurl);
         // we don't need it?
         // register_func(g_lua_state, "pinapp", lua_pinApp);
         register_func(g_lua_state, "setmanifestid", lua_setManifestid);
@@ -521,10 +507,6 @@ namespace LuaConfig{
 
     bool IsForcedDenuvo(AppId_t appId) {
         return ForcedDenuvoSet.count(appId) > 0;
-    }
-
-    const std::string& GetEticketUrl() {
-        return EticketUrl;
     }
 
     bool HasDepot(AppId_t DepotId,bool excludeOwned) {

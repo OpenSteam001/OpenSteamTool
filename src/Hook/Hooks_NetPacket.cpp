@@ -465,22 +465,29 @@ namespace Hooks_NetPacket_OwnershipTicket {
 
         const int32 origEresult = resp.eresult();
 
-        // Owner's signed ownership ticket, from the SAME mint as the eticket
-        // (one /eticket call → both tickets → one account). Ownership tickets are
-        // not nonce-bound, so pass an empty nonce. Fall back to the credential
-        // store (redeemed account) if the backend is unavailable.
-        auto owner = EticketClient::FetchOwnershipTicket(resp.app_id(), {});
-        if (!owner) {
-            auto stored = AppTicket::GetAppOwnershipTicketFromCredentialStore(resp.app_id());
-            if (stored.empty()) {
+        // Prefer the credential-store ticket when it is already valid: that
+        // ensures GetAppOwnershipTicketExtendedData and the 858 response hand
+        // Denuvo the identical bytes. Serving a different (backend-minted) ticket
+        // here caused a cross-check mismatch → 012 even when the SteamID was the
+        // same account. Only mint from the backend when the credential store has
+        // no valid ticket (existingSteamId == 0).
+        auto stored = AppTicket::GetAppOwnershipTicketFromCredentialStore(resp.app_id());
+        const uint64_t existingSteamId = AppTicket::ExtractSteamIdFromTicketBytes(stored);
+
+        std::vector<uint8_t> ticketBytes;
+        if (existingSteamId != 0) {
+            ticketBytes = std::move(stored);
+        } else {
+            auto minted = EticketClient::FetchOwnershipTicket(resp.app_id(), {}, 0);
+            if (!minted) {
                 LOG_NETPACKET_WARN("OwnershipTicketResponse[858]: appid={} eresult={} but no owner ticket available",
                                    resp.app_id(), origEresult);
                 return;
             }
-            owner = std::move(stored);
+            ticketBytes = std::move(*minted);
         }
 
-        resp.set_ticket(owner->data(), owner->size());
+        resp.set_ticket(ticketBytes.data(), ticketBytes.size());
         resp.set_eresult(k_EResultOK);
 
         const auto encSize = resp.ByteSizeLong();
@@ -496,7 +503,7 @@ namespace Hooks_NetPacket_OwnershipTicket {
         g_cbNewBody = static_cast<uint32>(encSize);
         g_NeedReplaceBody = true;
         LOG_NETPACKET_INFO("OwnershipTicketResponse[858]: spoofed appid={} ticket_bytes={} (orig eresult={} -> OK)",
-                           resp.app_id(), owner->size(), origEresult);
+                           resp.app_id(), ticketBytes.size(), origEresult);
     }
 
 } // namespace Hooks_NetPacket_OwnershipTicket

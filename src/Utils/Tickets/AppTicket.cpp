@@ -146,6 +146,12 @@ namespace AppTicket {
         return true;
     }
 
+    uint64_t ExtractSteamIdFromTicketBytes(const std::vector<uint8_t>& ticket) {
+        // Layout: ticket bytes start with [uint32 Size][uint32 Version][uint64 SteamID][...].
+        if (ticket.size() < kSteamIdTicketMinimumSize) return 0;
+        return reinterpret_cast<const uint64_t*>(ticket.data())[1];
+    }
+
     uint64_t GetSpoofSteamID(AppId_t appId) {
         // exclude those appids that are not in addappid
         if (!LuaConfig::HasDepot(appId)) {
@@ -160,13 +166,10 @@ namespace AppTicket {
         // The SteamID baked into the cached AppOwnershipTicket is the same
         // one Steam itself uses for this app — pull it straight out of the
         // ticket so spoofed responses match what the DRM layer expects.
-        // Layout: ticket bytes start with [uint32 Size][uint32 Version][uint64 SteamID][...].
-        std::vector<uint8_t> ticket = GetAppOwnershipTicketFromCredentialStore(appId);
-        if (ticket.size() >= kSteamIdTicketMinimumSize) {
-            const uint64_t steamID = reinterpret_cast<const uint64_t*>(ticket.data())[1];
+        const uint64_t steamID = ExtractSteamIdFromTicketBytes(GetAppOwnershipTicketFromCredentialStore(appId));
+        if (steamID) {
             LOG_DEBUG("GetSpoofSteamID for AppId {}: -> 0x{:X}({})", appId, steamID, steamID);
-            return steamID;
         }
-        return 0;
+        return steamID;
     }
 }
