@@ -24,7 +24,7 @@
 // ════════════════════════════════════════════════════════════════
 namespace {
 
-    constexpr uint32 kMaxBodySize   = 8092;
+    constexpr uint32 kMaxBodySize   = 65536;
     constexpr uint32 kMaxHdrSize    = 1024;
     constexpr uint32 kMaxPacketSize = 8 + kMaxHdrSize + kMaxBodySize;
     constexpr int    kPacketPoolSize = 8;
@@ -341,9 +341,9 @@ namespace Hooks_NetPacket_UserStats {
             LOG_ACHIEVEMENT_WARN("ClientGetUserStats request: appid={} is not in addappid", appId);
             return false;
         }
-        if (!req.has_schema_local_version() || req.schema_local_version() != -1) {
-            LOG_ACHIEVEMENT_WARN("ClientGetUserStats request: schema_local_version is not -1");
-            return false;
+        if (req.schema_local_version() != -1) {
+            req.set_schema_local_version(-1);
+            LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats request: forced schema_local_version to -1");
         }
 
         uint64_t newSteamId = LuaConfig::GetStatSteamId(appId);
@@ -360,7 +360,7 @@ namespace Hooks_NetPacket_UserStats {
     }
 
     // ── Recv: CMsgClientGetUserStatsResponse (eMsg 819) ────────
-    //     Strip stats(5) + achievement_blocks(6), patch eresult->OK.
+    //     Clear donor stats, overlay CR achievements, patch eresult->OK.
     bool HandleRecv_ClientGetUserStatsResponse(const uint8* pBody, uint32 cbBody)
     {
         CMsgClientGetUserStatsResponse resp;
@@ -374,13 +374,39 @@ namespace Hooks_NetPacket_UserStats {
         resp.clear_stats();
         resp.clear_achievement_blocks();
         resp.set_eresult(1);  // k_EResultOK
-        LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats response: clear stats and achievement_blocks, set eresult=OK");
 
-        g_NewBodySize = static_cast<uint32>(resp.ByteSizeLong());
-        if (!resp.SerializeToArray(const_cast<uint8*>(pBody), cbBody))
+        // Overlay CR's cloud-synced achievement state
+        const auto appId = static_cast<uint32_t>(resp.game_id());
+        CloudRedirectHost::AchievementBlock blocks[64];
+        uint32_t n = CloudRedirectHost::GetAchievements(appId, blocks, 64);
+        if (n > 0) {
+            uint32_t crc = 0;
+            for (uint32_t i = 0; i < n; i++) {
+                auto* s = resp.add_stats();
+                s->set_stat_id(blocks[i].statId);
+                s->set_stat_value(blocks[i].bits);
+                auto* ab = resp.add_achievement_blocks();
+                ab->set_achievement_id(blocks[i].statId);
+                for (uint32_t bit = 0; bit < 32; bit++)
+                    ab->add_unlock_time(blocks[i].unlockTimes[bit]);
+                crc ^= blocks[i].bits ^ blocks[i].statId;
+            }
+            resp.set_crc_stats(crc);
+            LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats response: injected {} CR achievement blocks for app {}", n, appId);
+        } else {
+            LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats response: cleared stats/achievements (no CR data for app {})", appId);
+        }
+
+        auto newSize = resp.ByteSizeLong();
+        if (newSize > sizeof(g_NewBody)) {
+            LOG_ACHIEVEMENT_WARN("ClientGetUserStats response: modified message too large ({} bytes)", newSize);
+            return false;
+        }
+        if (!resp.SerializeToArray(g_NewBody, sizeof(g_NewBody)))
             return false;
 
-        g_ResizedInPlace = true;
+        g_cbNewBody = static_cast<uint32>(newSize);
+        g_NeedReplaceBody = true;
         LOG_ACHIEVEMENT_DEBUG("ClientGetUserStats response: modified body:\n{}", resp.DebugString());
         return true;
     }
@@ -821,6 +847,8 @@ namespace Hooks_NetPacket_RichPresence {
             if (hdr.ParseFromArray(pHdr, cbHdr) && hdr.has_steamid() && hdr.steamid()) {
                 g_LocalSteamId = hdr.steamid();
                 LOG_RICHPRESENCE_DEBUG("Captured local SteamID 0x{:X}", g_LocalSteamId);
+                CloudRedirectHost::SetAccountId(
+                    static_cast<uint32_t>(g_LocalSteamId & 0xFFFFFFFF));
             }
         }
 
@@ -841,7 +869,13 @@ namespace Hooks_NetPacket_RichPresence {
             newTracked = topmost;
 
         if (g_PlayingAppId == newTracked) return;
+        AppId_t oldTracked = g_PlayingAppId;
         g_PlayingAppId = newTracked;
+
+        if (oldTracked != 0)
+            CloudRedirectHost::NotifyAppRunning(oldTracked, false);
+        if (newTracked != 0)
+            CloudRedirectHost::NotifyAppRunning(newTracked, true);
 
         if (newTracked != 0) {
             LOG_RICHPRESENCE_INFO("Tracking topmost appid {}", newTracked);
@@ -1173,7 +1207,12 @@ namespace {
         // Steam Cloud save redirection: hand every "Cloud.*" request to
         // CloudRedirect. If it answers, suppress the outbound frame (the
         // synthesized response is delivered from the RecvPkt hook).
+        // ExitSyncDone/ConflictResolution are notifications that must reach
+        // Steam's internal cloud state machine untouched.
         if (std::strncmp(targetJobName, "Cloud.", 6) == 0) {
+            if (std::strcmp(targetJobName, "Cloud.SignalAppExitSyncDone#1") == 0 ||
+                std::strcmp(targetJobName, "Cloud.ClientConflictResolution#1") == 0)
+                return false;
             if (Hooks_NetPacket_Cloud::HandleSend(targetJobName, pBody, cbBody, pHdr, cbHdr))
                 g_SuppressSend = true;
             return false;   // never body-replace a cloud frame
@@ -1227,6 +1266,13 @@ namespace {
         case k_EMsgClientGetUserStats:               // 818
             g_NeedReplaceSend = Hooks_NetPacket_UserStats::HandleSend_ClientGetUserStats(pBody, cbBody);
             return;
+
+        case k_EMsgClientStoreUserStats2: {         // 5466
+            AppId_t appId = Hooks_NetPacket_RichPresence::g_PlayingAppId;
+            if (appId != 0)
+                CloudRedirectHost::NotifyStatsStored(appId);
+            return;
+        }
 
         default:
             return;

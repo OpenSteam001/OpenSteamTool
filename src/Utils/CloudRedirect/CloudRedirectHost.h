@@ -34,6 +34,18 @@ namespace CloudRedirectHost {
                         uint8_t* respBuf, uint32_t respMaxLen,
                         uint32_t* respLen, int32_t* eresult);
 
+    void SetAccountId(uint32_t accountId);
+    void NotifyAppRunning(uint32_t appId, bool running);
+    void NotifyStatsStored(uint32_t appId);
+
+    struct AchievementBlock {
+        uint32_t statId;
+        uint32_t bits;
+        uint32_t unlockTimes[32];
+    };
+    // Returns number of blocks written (0 if none/disabled).
+    uint32_t GetAchievements(uint32_t appId, AchievementBlock* out, uint32_t maxBlocks);
+
     // Teardown. Called from DLL_PROCESS_DETACH.
     void Shutdown();
 
