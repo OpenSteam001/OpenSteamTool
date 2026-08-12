@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -64,6 +65,45 @@ namespace {
     constexpr uint32 kMinPackedModuleBytes = 80u * 1024u * 1024u;
     constexpr size_t kLegacyScanChunkBytes = 8ull * 1024ull * 1024ull;
     constexpr size_t kOepScanChunkBytes = 8ull * 1024ull * 1024ull;
+
+    // Structural fallback for Denuvo builds that ship NO OEP pattern and NO
+    // "DENUVO" string (both checks above return nothing). A runtime-decrypting
+    // protector must still carry a large code section that is simultaneously
+    // writable AND executable (it decrypts itself in place). That W+X-on-disk
+    // flag is the decisive, version-independent signal: it is effectively
+    // absent from legitimately compiled binaries, which ship read-only code
+    // (R-X) and non-executable data (RW-). No modern toolchain emits a multi-MB
+    // section that is both writable and executable on disk.
+    //
+    // Entropy is only a weak sanity floor here, NOT the discriminator — it
+    // rejects sparse / zero-filled / trivially-compressible blobs while the
+    // W+X + size condition carries the decision. Protector blobs vary widely:
+    //   Sonic Forces (637100): .arch RWX, 103.9 MB, entropy 7.247
+    //   APK    (Unreal Shipping): .bss  RWX, 405.6 MB, entropy 6.651 (uniform
+    //                             across the whole section — not a sample fluke)
+    // A 7.0 floor false-negatived the second one despite it carrying the literal
+    // "DENUVO" string, so the floor is set just above normal x64 code (~6.0-6.4)
+    // rather than at "looks encrypted". We do NOT key off the section name
+    // (.arch/.bss) — Denuvo renames sections freely.
+    constexpr uint32 kProtectorBlobMinBytes = 4u * 1024u * 1024u;       // skip small legit RWX thunks
+    constexpr double kProtectorBlobMinEntropy = 6.0;                    // sparse/zero guard, not "is encrypted"
+    constexpr double kProtectorBlobHighConfidenceEntropy = 7.0;         // looks encrypted/packed at rest
+    constexpr size_t kProtectorBlobEntropySampleBytes = 8ull * 1024ull * 1024ull;  // cap per-section read
+
+    double SectionEntropy(std::span<const uint8_t> bytes) {
+        if (bytes.empty()) return 0.0;
+        std::array<uint64, 256> counts{};
+        for (uint8_t value : bytes) ++counts[value];
+        const double inv = 1.0 / static_cast<double>(bytes.size());
+        double entropy = 0.0;
+        for (uint64 count : counts) {
+            if (count) {
+                const double p = static_cast<double>(count) * inv;
+                entropy -= p * std::log2(p);
+            }
+        }
+        return entropy;  // 0.0 .. 8.0 bits/byte
+    }
 
     double BytesToMiB(uint64 bytes) {
         return static_cast<double>(bytes) / (1024.0 * 1024.0);
@@ -227,6 +267,45 @@ namespace {
         return match;
     }
 
+    std::optional<DetectionMatch> TryProtectedBlobSection(
+        const ModuleCandidate& module,
+        const OSTPlatform::PE::Image& image) {
+        for (const auto& section : image.Sections()) {
+            // The durable signal: a section that is BOTH writable and
+            // executable. This header flag is identical on disk and in the
+            // mapped image and is present before the protector decrypts.
+            if (!(section.IsExecutable() && section.IsWritable())) continue;
+            if (section.rawSize < kProtectorBlobMinBytes) continue;
+
+            const size_t sampleSize =
+                (std::min)(static_cast<size_t>(section.rawSize), kProtectorBlobEntropySampleBytes);
+            const OSTPlatform::PE::ByteBuffer sample = image.ReadRawBytes(section.rawOffset, sampleSize);
+            if (sample.empty()) continue;
+
+            const double entropy = SectionEntropy(sample);
+            if (entropy < kProtectorBlobMinEntropy) {
+                LOG_PIPE_DEBUG("DenuvoAuth: RWX section below entropy floor path={} section={} raw_size={} ({:.2f} MB) entropy={:.3f}",
+                               module.path, section.name, section.rawSize,
+                               BytesToMiB(static_cast<uint64>(section.rawSize)), entropy);
+                continue;
+            }
+
+            DetectionMatch match{};
+            match.method = DetectionMethod::ProtectedBlobSection;
+            match.sectionName = section.name;
+            match.entryPointRva = image.EntryPointRva();
+            match.matchRawOffset = section.rawOffset;
+            match.matchRva = section.virtualAddress;
+            const char* confidence =
+                entropy >= kProtectorBlobHighConfidenceEntropy ? "high(encrypted)" : "elevated";
+            LOG_PIPE_INFO("DenuvoAuth: protector blob section path={} section={} raw_size={} ({:.2f} MB) entropy={:.3f} flags=RWX confidence={}",
+                          module.path, section.name, section.rawSize,
+                          BytesToMiB(static_cast<uint64>(section.rawSize)), entropy, confidence);
+            return match;
+        }
+        return std::nullopt;
+    }
+
     std::optional<DetectionMatch> DetectModule(
         const ModuleCandidate& module,
         const OSTPlatform::PE::Image& image) {
@@ -236,7 +315,16 @@ namespace {
         }
 
         if (const auto* legacySection = FindLegacyDenuvoSection(image)) {
-            return TryLegacySectionString(module, image, *legacySection);
+            if (auto match = TryLegacySectionString(module, image, *legacySection)) {
+                return match;
+            }
+        }
+
+        // Structural fallback: catches Denuvo builds that carry the legacy
+        // sections (or not) but ship no OEP pattern and no DENUVO string, so the
+        // two checks above come up empty (e.g. Sonic Forces 637100).
+        if (auto match = TryProtectedBlobSection(module, image)) {
+            return match;
         }
         return std::nullopt;
     }
@@ -353,6 +441,7 @@ const char* ToString(DetectionMethod method) {
     case DetectionMethod::None: return "None";
     case DetectionMethod::LegacySectionString: return "LegacySectionString";
     case DetectionMethod::OepPattern: return "OepPattern";
+    case DetectionMethod::ProtectedBlobSection: return "ProtectedBlobSection";
     }
     return "Unknown";
 }

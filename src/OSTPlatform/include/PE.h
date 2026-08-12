@@ -43,8 +43,14 @@ struct Section {
     uint32_t virtualSize = 0;
     uint32_t rawOffset = 0;
     uint32_t rawSize = 0;
+    uint32_t characteristics = 0;  // IMAGE_SECTION_HEADER::Characteristics
 
     bool ContainsRva(uint32_t rva) const;
+    // IMAGE_SCN_MEM_EXECUTE / IMAGE_SCN_MEM_WRITE — a section that is both is a
+    // W^X violation (self-modifying code), the hallmark of a runtime-decrypting
+    // protector.
+    bool IsExecutable() const { return (characteristics & 0x20000000u) != 0; }
+    bool IsWritable() const { return (characteristics & 0x80000000u) != 0; }
 };
 
 struct Export {

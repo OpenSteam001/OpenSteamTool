@@ -28,6 +28,13 @@ namespace LuaConfig{
     std::unordered_map<uint64_t, ManifestOverride> ManifestOverrides{};
     std::unordered_map<AppId_t, uint64_t> StatSteamIdSet{};
     std::unordered_set<AppId_t> OwnedAppIdSet{};
+    // Process exe name (lowercase) → appid; populated by addprocess() in Lua config.
+    std::unordered_map<std::string, AppId_t> ProcessNameAppIdMap{};
+    // App IDs that should bypass ProtectionScan and be treated as Denuvo games.
+    std::unordered_set<AppId_t> ForcedDenuvoSet{};
+    // On-demand eticket mint endpoint, set via seteticketurl() in Lua config.
+    // Empty = disabled (EticketClient falls back to credential-store ticket).
+    std::string EticketUrl{};
 
     // Per-file tracking: which depots each .lua file contributed.
     static std::string g_currentFile;
@@ -266,6 +273,44 @@ namespace LuaConfig{
         return 0;
     }
 
+    static int lua_addprocess(lua_State* L) {
+        // addprocess(appid, "ExeName.exe")
+        // Maps a process exe name to an appid so OST can identify games
+        // that launch without exporting SteamAppId env vars.
+        int argc = lua_gettop(L);
+        if (argc < 2 || !lua_isinteger(L, 1) || !lua_isstring(L, 2))
+            return luaL_error(L, "addprocess requires (appid: integer, exename: string)");
+        lua_Integer value = lua_tointeger(L, 1);
+        if (value <= 0 || value > static_cast<lua_Integer>(UINT32_MAX))
+            return luaL_error(L, "addprocess: appid out of range");
+        std::string name(lua_tostring(L, 2));
+        for (char& ch : name)
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        ProcessNameAppIdMap[name] = static_cast<AppId_t>(value);
+        return 0;
+    }
+
+    static int lua_forcedenuvo(lua_State* L) {
+        // forcedenuvo(appid) — bypass ProtectionScan for games where the heuristic fails.
+        if (lua_gettop(L) < 1 || !lua_isinteger(L, 1))
+            return luaL_error(L, "forcedenuvo requires (appid: integer)");
+        lua_Integer value = lua_tointeger(L, 1);
+        if (value <= 0 || value > static_cast<lua_Integer>(UINT32_MAX))
+            return luaL_error(L, "forcedenuvo: appid out of range");
+        ForcedDenuvoSet.insert(static_cast<AppId_t>(value));
+        return 0;
+    }
+
+    static int lua_seteticketurl(lua_State* L) {
+        // seteticketurl("http://your-backend/eticket")
+        // Endpoint that mints fresh nonce-bound encrypted app tickets for
+        // strict Denuvo titles. Set to "" (or omit the call) to disable.
+        if (lua_gettop(L) < 1 || !lua_isstring(L, 1))
+            return luaL_error(L, "seteticketurl requires (url: string)");
+        EticketUrl = std::string(lua_tostring(L, 1));
+        return 0;
+    }
+
     static int lua_pinApp(lua_State* L) {
         // pinApp(integer)
         int argc = lua_gettop(L);
@@ -443,6 +488,9 @@ namespace LuaConfig{
         // (e.g. setAppTICKET, addAppId, SETManifestid, etc.).
         register_func(g_lua_state, "addappid", lua_addappid);
         register_func(g_lua_state, "addtoken", lua_addtoken);
+        register_func(g_lua_state, "addprocess", lua_addprocess);
+        register_func(g_lua_state, "forcedenuvo", lua_forcedenuvo);
+        register_func(g_lua_state, "seteticketurl", lua_seteticketurl);
         // we don't need it?
         // register_func(g_lua_state, "pinapp", lua_pinApp);
         register_func(g_lua_state, "setmanifestid", lua_setManifestid);
@@ -463,6 +511,22 @@ namespace LuaConfig{
     }
 
     // ── public query API ─────────────────────────────────────────
+    AppId_t GetAppIdForProcess(const std::string& imageName) {
+        std::string lower(imageName);
+        for (char& ch : lower)
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        const auto it = ProcessNameAppIdMap.find(lower);
+        return it != ProcessNameAppIdMap.end() ? it->second : k_uAppIdInvalid;
+    }
+
+    bool IsForcedDenuvo(AppId_t appId) {
+        return ForcedDenuvoSet.count(appId) > 0;
+    }
+
+    const std::string& GetEticketUrl() {
+        return EticketUrl;
+    }
+
     bool HasDepot(AppId_t DepotId,bool excludeOwned) {
         return DepotKeySet.count(DepotId) && (!excludeOwned || !IsOwned(DepotId));
     }

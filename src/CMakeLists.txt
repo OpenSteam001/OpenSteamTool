@@ -103,6 +103,7 @@ add_library(OpenSteamTool SHARED
 
     # Shared utilities
     Utils/Tickets/AppTicket.cpp
+    Utils/Tickets/EticketClient.cpp
     Utils/Config/Config.cpp
     Utils/Config/ConfigFileWatcher.cpp
     Utils/Config/LuaConfig.cpp
@@ -167,6 +168,22 @@ target_link_libraries(OpenSteamTool PRIVATE
 target_compile_definitions(OpenSteamTool PRIVATE
     $<$<CONFIG:Debug>:OPENSTEAMTOOL_LOGGING_ENABLED>
 )
+
+# Backend endpoint for on-demand eticket minting (strict Denuvo titles that bind
+# their encrypted app ticket to a launch nonce). Empty by default: the feature is
+# off and the DLL never makes a network request. Point your own build at your own
+# backend and the resulting DLL is self-contained, no Lua config needed:
+#
+#   cmake -B build -DOST_ETICKET_URL="https://your-host/eticket"
+#
+# Left out of the source deliberately so no single deployment's backend ships
+# baked into a public tree. seteticketurl() in the Lua config overrides it.
+set(OST_ETICKET_URL "" CACHE STRING
+    "Backend URL for on-demand eticket minting (empty disables the feature)")
+if(OST_ETICKET_URL)
+    target_compile_definitions(OpenSteamTool PRIVATE
+        OST_ETICKET_URL="${OST_ETICKET_URL}")
+endif()
 
 # ---------------------------------------------------------------------------
 # dwmapi.dll hijack — small loader DLL placed alongside Steam.

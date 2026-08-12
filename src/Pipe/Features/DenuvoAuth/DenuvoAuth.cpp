@@ -151,7 +151,7 @@ namespace {
         return authIt == g_processAuth.end() ? nullptr : &authIt->second;
     }
 
-    void EnsureScanned(ProcessAuth& auth, const ProcessKey& process) {
+    void EnsureScanned(ProcessAuth& auth, const ProcessKey& process, AppId_t appId) {
         if (auth.scanned) {
             LOG_PIPE_TRACE("DenuvoAuth: reusing cached protection result {} denuvo={}",
                            process.DebugString(), auth.denuvo);
@@ -159,7 +159,12 @@ namespace {
         }
 
         auth.scanned = true;
-        auth.denuvo = ScanProtection(process.pid).denuvoDetected;
+        if (LuaConfig::IsForcedDenuvo(appId)) {
+            auth.denuvo = true;
+            LOG_PIPE_INFO("DenuvoAuth: forcedenuvo appid={} — skipping ProtectionScan", appId);
+        } else {
+            auth.denuvo = ScanProtection(process.pid).denuvoDetected;
+        }
         if (!auth.denuvo) auth.stage = Stage::None;
     }
 
@@ -174,7 +179,7 @@ void Apply(const PipeContext& ctx) {
     ProcessAuth& auth = g_processAuth[ctx.process];
     g_pipeProcess[pipeKey] = ctx.process;
 
-    EnsureScanned(auth, ctx.process);
+    EnsureScanned(auth, ctx.process, ctx.appId);
     auth.OnHandshake(ctx, pipeKey);
 }
 

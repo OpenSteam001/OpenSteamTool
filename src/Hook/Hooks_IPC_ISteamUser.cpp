@@ -2,13 +2,26 @@
 #include "Hooks_IPC_ISteamUser.h"
 #include "PendingAPICalls.h"
 #include "Utils/Tickets/AppTicket.h"
+#include "Utils/Tickets/EticketClient.h"
 #include "Pipe/PipeManager.h"
 #include "Pipe/Features/DenuvoAuth/DenuvoAuth.h"
 #include "Utils/Logging/Log.h"
 #include "Hooks_Misc.h"
+#include "Utils/Config/LuaConfig.h"
+
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 
 namespace {
     using namespace IPCMessages::IClientUser;
+
+    // Fresh, nonce-bound etickets minted on-demand in RequestEncryptedAppTicket
+    // (keyed by appId) and consumed by GetEncryptedAppTicket on the same launch.
+    // Lets the strict-Denuvo path serve a ticket matching the launch nonce while
+    // keeping GetEncryptedAppTicket's credential-store serve as the fallback.
+    std::mutex g_freshEticketMutex;
+    std::unordered_map<AppId_t, std::vector<uint8_t>> g_freshEticket;
 
     // [Post-Handler]: IClientUser::GetSteamID
     void HandlerPost_IClientUser_GetSteamID(CPipeClient* pipe,CUtlBuffer* pRead, CUtlBuffer* pWrite)
@@ -17,14 +30,15 @@ namespace {
         GetSteamIDResp resp{pWrite};
         if (!resp.ok()) return;
 
-        if (!PipeManager::DenuvoAuth::IsAuthorizedPipe(pipe)) {
-            LOG_IPC_TRACE("IClientUser::GetSteamID: AppId={} not in authorization window, skip spoofing", appId);
-            return;
-        }
-
+        // Spoof whenever we have a pool-account ticket for this app, not just
+        // inside the Denuvo auth window. Denuvo reads its cached offline
+        // license on second launch and calls GetSteamID BEFORE or AFTER the
+        // auth window to verify it — if we only spoof inside the window the
+        // real SteamID leaks out and mismatches the license → 012.
+        // GetSpoofSteamID returns 0 for apps with no credential-store ticket
+        // (real owners, non-tracked apps) so the spoof is naturally scoped.
         const uint64 spoofed = AppTicket::GetSpoofSteamID(appId);
         if (!spoofed) {
-            LOG_IPC_WARN("IClientUser::GetSteamID: AppId={} no valid steamid - cannot spoof", appId);
             return;
         }
 
@@ -49,8 +63,12 @@ namespace {
         if (PipeManager::DenuvoAuth::IsAuthorizedPipe(pipe)) {
             ticketSource = AppTicket::AppTicketSource::CredentialStoreOnly;
         } else {
-            LOG_IPC_DEBUG("IClientUser::GetAppOwnershipTicketExtendedData: AppId={} not in authorization window, only forge available", appId);
-            ticketSource = AppTicket::AppTicketSource::ForgeOnly;
+            // Outside the auth window: prefer credential-store ticket (pool SteamID)
+            // over ForgeOnly (which uses app 7's ticket and carries the real SteamID).
+            // When the 858 network spoof is also active, both paths must agree on the
+            // same SteamID or Denuvo cross-checks them and rejects (error 54).
+            LOG_IPC_DEBUG("IClientUser::GetAppOwnershipTicketExtendedData: AppId={} not in authorization window, credential store preferred", appId);
+            ticketSource = AppTicket::AppTicketSource::CredentialStoreThenForge;
         }        
         if (!AppTicket::GetAppOwnershipTicket(appId, ticket, ticketSource)) return;
 
@@ -83,27 +101,75 @@ namespace {
         if (!resp.ok()) return;
 
         AppId_t appId = Hooks_Misc::ResolveAppId();
+
+        // Strict Denuvo passes a per-launch nonce (pData) here and rejects a
+        // stale/cached ticket (88500012). Try an on-demand mint bound to that
+        // exact nonce; cache it for GetEncryptedAppTicket. Any failure falls
+        // through to the static credential store below.
+        {
+            RequestEncryptedAppTicketReq req{pRead};
+            std::span<const uint8_t> nonce;
+            if (req.ok()) nonce = req.pData();
+            // Whatever account the registry's current static ticket already
+            // belongs to (0 if none) — lets the backend pin the mint to that
+            // SAME account instead of risking a different pool pick.
+            const uint64_t existingSteamId = AppTicket::ExtractSteamIdFromTicketBytes(
+                AppTicket::GetAppOwnershipTicketFromCredentialStore(appId));
+            // Mint a fresh eticket whenever the credential store already has a ticket
+            // for this app (existingSteamId != 0). The minted eticket is pinned to
+            // the same pool account via existingSteamId, which matches GetSteamID's
+            // spoof (also sourced from the credential store via CredentialStoreThenForge)
+            // — no error-54 risk. This fixes error 05 for games launched more than
+            // 30 min after activation (stored ticket expired, fresh mint is current).
+            if (existingSteamId != 0) {
+                if (auto fresh = EticketClient::FetchFreshEticket(appId, nonce, existingSteamId)) {
+                    std::lock_guard<std::mutex> lock(g_freshEticketMutex);
+                    g_freshEticket[appId] = std::move(*fresh);
+                }
+            }
+        }
+
+        bool haveFresh;
+        {
+            std::lock_guard<std::mutex> lock(g_freshEticketMutex);
+            haveFresh = g_freshEticket.find(appId) != g_freshEticket.end();
+        }
+
         std::vector<uint8_t> ticket = AppTicket::GetEncryptedTicketFromCredentialStore(appId);
-        if (ticket.empty()) {
+        if (ticket.empty() && !haveFresh) {
             LOG_IPC_DEBUG("RequestEncryptedAppTicket: AppId={} - no cached eticket, skip", appId);
             return;
         }
 
         const SteamAPICall_t hAsyncCall = resp.returnValue();
         PendingAPICalls::RecordEncryptedTicket(hAsyncCall, appId);
-        LOG_IPC_DEBUG("RequestEncryptedAppTicket: AppId={} hAsyncCall=0x{:X} - recorded",
-                      appId, hAsyncCall);
+        LOG_IPC_DEBUG("RequestEncryptedAppTicket: AppId={} hAsyncCall=0x{:X} - recorded (fresh={})",
+                      appId, hAsyncCall, haveFresh);
     }
 
     // [Post-Handler]: IClientUser::GetEncryptedAppTicket
     void HandlerPost_IClientUser_GetEncryptedAppTicket(CPipeClient* pipe, CUtlBuffer* pRead, CUtlBuffer* pWrite)
     {
         AppId_t appId = Hooks_Misc::ResolveAppId();
-        std::vector<uint8_t> ticket = AppTicket::GetEncryptedTicketFromCredentialStore(appId);
+
+        // Prefer a fresh nonce-bound ticket minted in RequestEncryptedAppTicket;
+        // fall back to the static credential-store ticket (titles that don't
+        // need the on-demand path keep working unchanged).
+        std::vector<uint8_t> ticket;
+        {
+            std::lock_guard<std::mutex> lock(g_freshEticketMutex);
+            auto it = g_freshEticket.find(appId);
+            if (it != g_freshEticket.end()) ticket = it->second;
+        }
+        const bool fromFresh = !ticket.empty();
+        if (ticket.empty()) {
+            ticket = AppTicket::GetEncryptedTicketFromCredentialStore(appId);
+        }
         if (ticket.empty()) {
             LOG_IPC_DEBUG("GetEncryptedAppTicket: AppId={} - no cached eticket, skip", appId);
             return;
         }
+        LOG_IPC_DEBUG("GetEncryptedAppTicket: AppId={} serving source={}", appId, fromFresh ? "fresh" : "store");
 
         uint32 ticketSize = static_cast<uint32>(ticket.size());
         uint32 newCapacity = pWrite->Capacity() + ticketSize;

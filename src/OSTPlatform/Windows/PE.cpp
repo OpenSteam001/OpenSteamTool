@@ -242,6 +242,7 @@ Image::Image(const std::filesystem::path& path) : path_(path) {
             section->Misc.VirtualSize,
             section->PointerToRawData,
             section->SizeOfRawData,
+            section->Characteristics,
         });
     }
 

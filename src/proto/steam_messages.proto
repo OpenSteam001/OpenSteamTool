@@ -79,6 +79,20 @@ message CMsgClientRequestEncryptedAppTicketResponse {
 
 
 // ============================================================
+// CMsgClientGetAppOwnershipTicketResponse  (eMsg 858)
+// Field order confirmed from a live capture (eresult=1, app_id=2, ticket=3):
+//   AccessDenied: 08 0F 10 CA 9E 13            (eresult=15, app_id=315210)
+//   OK:           08 01 10 07 1A B2 01 <178B>  (eresult=1,  ticket=...)
+// ============================================================
+
+message CMsgClientGetAppOwnershipTicketResponse {
+    optional int32   eresult  = 1 [default = 2];
+    optional uint32  app_id   = 2;
+    optional bytes   ticket   = 3;
+}
+
+
+// ============================================================
 // CMsgClientPICSProductInfoRequest  (eMsg 8903)
 // ============================================================
 message CMsgClientPICSProductInfoRequest {

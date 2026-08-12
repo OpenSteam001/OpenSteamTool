@@ -15,6 +15,7 @@ namespace PipeManager::DenuvoAuth {
         None,
         LegacySectionString,
         OepPattern,
+        ProtectedBlobSection,
     };
 
     const char* ToString(DetectionMethod method);
