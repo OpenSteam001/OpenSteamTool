@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="docs/bst.png" width="180" alt="Logo de BetterSteamTools">
+  <img src="docs/bst.png" width="100%" alt="Logo de BetterSteamTools">
 
-  <h1>OpenSteamTool</h1>
+  <h1>BetterSteamTools - a fork of OpenSteamTools!</h1>
 
   <p>
     <strong>Herramienta de código abierto para desbloquear Steam</strong>
