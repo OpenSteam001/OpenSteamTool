@@ -10,6 +10,7 @@ level = "debug"
 [manifest]
 # Which upstream API to query for depot manifest request codes.
 #   "opensteamtool" → https://manifest.opensteamtool.com/{gid}   (default)
+#   "manifestdex"   → https://manifest.manifestdex.com/{gid}
 #   "wudrm"         → http://gmrc.wudrm.com/manifest/{gid} (recommended for China users)
 #   "steamrun"      → https://manifest.steam.run/api/manifest/{gid}
 # If <Steam>/config/lua/manifest.lua defines fetch_manifest_code(gid) or
