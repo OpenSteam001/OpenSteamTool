@@ -42,7 +42,8 @@ namespace Config {
     CloudSettings GetCloudSettings();
     bool GetStatsEnableApi();
 
-    // [manifest] — provider selection lives in ManifestClient (table-driven).
+    // [manifest] — provider selection lives in ManifestClient
+    // (built-in name or custom {gid} URL template + format).
     inline uint32_t manifestTimeoutResolve = 5000;
     inline uint32_t manifestTimeoutConnect = 5000;
     inline uint32_t manifestTimeoutSend    = 10000;

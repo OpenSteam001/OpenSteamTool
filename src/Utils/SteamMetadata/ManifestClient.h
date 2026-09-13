@@ -4,16 +4,24 @@
 
 // ─────────────────────────────────────────────────────────────────
 //  ManifestClient — HTTP client for depot manifest request codes.
-//  Provider table is internal (see kProviders in ManifestClient.cpp);
-//  adding a new provider only requires one row there.
+//  Built-in providers live in kProviders (ManifestClient.cpp); any
+//  other [manifest] url is used as a custom URL template as-is.
 //
 //  Thread-safe — serialises access to the underlying WinHTTP connection.
 // ─────────────────────────────────────────────────────────────────
 namespace ManifestClient {
 
+    inline constexpr std::string_view kDefaultProviderName = "opensteamtool";
+
     // Select the active provider by its string name (matches kProviders[i].name).
     // Returns false if no provider matches; the previous selection is kept.
     bool SetProvider(std::string_view name);
+
+    // Use a custom URL template containing one {gid} placeholder, e.g.
+    // "https://my.server/manifest/{gid}". Format selects the response
+    // parser: "plain" (bare digits) or "steamrun" ({"content":"..."}).
+    // Returns false if the template is invalid; the previous selection is kept.
+    bool SetCustomProvider(std::string_view urlTemplate, std::string_view format);
 
     // Name of the currently active provider (for logging / diagnostics).
     const char* ActiveProviderName();

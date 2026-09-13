@@ -8,10 +8,13 @@
 level = "debug"
 
 [manifest]
-# Which upstream API to query for depot manifest request codes.
+# Which upstream API to query for depot manifest request codes: a built-in
+# name or a custom URL template containing {gid}.
 #   "opensteamtool" → https://manifest.opensteamtool.com/{gid}   (default)
 #   "wudrm"         → http://gmrc.wudrm.com/manifest/{gid} (recommended for China users)
 #   "steamrun"      → https://manifest.steam.run/api/manifest/{gid}
+#   custom          → e.g. "https://my.server/manifest/{gid}" (must be
+#     http(s) with {gid}; invalid values fall back to "opensteamtool")
 # If <Steam>/config/lua/manifest.lua defines fetch_manifest_code(gid) or
 # fetch_manifest_code_ex(app_id, depot_id, gid), those Lua functions take
 # priority over the url setting below.
@@ -45,6 +48,10 @@ level = "debug"
 #     return nil
 # end
 url = "opensteamtool"
+
+# Response shape of a custom url (built-ins ignore this): "plain" (bare
+# digits, default) or "steamrun" ({"content":"..."}).
+format = "plain"
 
 # HTTP timeouts for manifest requests (milliseconds).
 # timeout_resolve_ms  — DNS resolution        (default: 5000)

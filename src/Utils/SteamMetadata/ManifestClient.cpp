@@ -1,12 +1,14 @@
 #include "ManifestClient.h"
 #include "OSTPlatform/include/Http.h"
+#include "OSTPlatform/include/Numbers.h"
 #include "Utils/Config/Config.h"
 #include "Utils/Config/LuaConfig.h"
 #include "Utils/Logging/Log.h"
 
 #include <algorithm>
-#include <charconv>
+#include <cstdio>
 #include <mutex>
+#include <string>
 #include <string_view>
 
 namespace ManifestClient {
@@ -15,10 +17,11 @@ namespace ManifestClient {
     using Parser = bool (*)(std::string_view body, uint64_t* out);
 
     static bool ParsePlainUint(std::string_view body, uint64_t* out) {
-        uint64_t code = 0;
-        auto [_, ec] = std::from_chars(body.data(), body.data() + body.size(), code);
-        if (ec != std::errc{}) return false;
-        *out = code;
+        const size_t end = body.find_last_not_of(" \t\r\n");
+        if (end == std::string_view::npos) return false;
+        const auto code = OSTPlatform::Numbers::ParseUInt64(body.substr(0, end + 1));
+        if (!code) return false;
+        *out = *code;
         return true;
     }
 
@@ -34,13 +37,12 @@ namespace ManifestClient {
 
     // ── provider table ────────────────────────────────────────────
     //
-    // Adding a new provider: add one row to kProviders below.
-    // host / port / tls / path are all derived from the URL template
-    // by Make() at compile time.
+    // Built-in providers below; anything else in [manifest] url is used
+    // as a custom URL template via SetCustomProvider, no code change needed.
 
     struct Provider {
         std::string_view name;          // matches [manifest] url = "..."
-        const char*      urlTemplate;   // full literal with one %llu — for log & path
+        const char*      urlTemplate;   // %llu (built-in) or {gid} (custom)
         Parser           parse;
     };
 
@@ -54,7 +56,10 @@ namespace ManifestClient {
         Make("steamrun",      "https://manifest.steam.run/api/manifest/%llu",  ParseSteamRunJson),
     };
 
-    static const Provider* g_active = &kProviders[0];   // opensteamtool
+    static const Provider* g_active = &kProviders[0];
+    static_assert(kProviders[0].name == kDefaultProviderName);
+    static std::string     g_customUrl;
+    static Provider        g_custom = {"custom", nullptr, ParsePlainUint};
     static std::mutex      g_mutex;
 
     bool SetProvider(std::string_view name) {
@@ -65,6 +70,47 @@ namespace ManifestClient {
                 return true; 
             }
         return false;
+    }
+
+    static bool IsCustomTemplate(std::string_view url) {
+        if (url.empty() || url.size() > 512) return false;
+        std::string_view rest;
+        if (url.starts_with("https://")) rest = url.substr(8);
+        else if (url.starts_with("http://")) rest = url.substr(7);
+        else return false;
+        if (rest.find("{gid}") == std::string_view::npos) return false;
+        // Same authority rules Http::Execute enforces: expand the placeholder,
+        // then require a non-empty host and a valid port.
+        std::string expanded(rest);
+        for (size_t pos = 0; (pos = expanded.find("{gid}", pos)) != std::string::npos;)
+            expanded.replace(pos, 5, "0");
+        const size_t slash = expanded.find('/');
+        const std::string_view hostPart(expanded.data(), slash == std::string::npos ? expanded.size() : slash);
+        const size_t colon = hostPart.find(':');
+        if (hostPart.substr(0, colon).empty()) return false;
+        for (const char c : hostPart.substr(0, colon))
+            if (static_cast<unsigned char>(c) <= 0x20 || c == 0x7f) return false;
+        if (colon != std::string_view::npos) {
+            const auto port = OSTPlatform::Numbers::ParseUInt32(hostPart.substr(colon + 1));
+            if (!port || *port == 0 || *port > 65535) return false;
+        }
+        return true;
+    }
+
+    static Parser ParserFor(std::string_view format) {
+        if (format == "steamrun") return ParseSteamRunJson;
+        return ParsePlainUint;
+    }
+
+    bool SetCustomProvider(std::string_view urlTemplate, std::string_view format) {
+        if (!IsCustomTemplate(urlTemplate)) return false;
+        if (format != "plain" && format != "steamrun")
+            LOG_WARN("Unknown manifest.format \"{}\", using plain", format);
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_customUrl.assign(urlTemplate);
+        g_custom = {"custom", g_customUrl.c_str(), ParserFor(format)};
+        g_active = &g_custom;
+        return true;
     }
 
     const char* ActiveProviderName() {
@@ -84,12 +130,21 @@ namespace ManifestClient {
         const Provider& p = *g_active;
         const Config::ManifestTimeouts timeouts = Config::GetManifestTimeouts();
 
-        char urlLog[256];
-        std::snprintf(urlLog, sizeof(urlLog), p.urlTemplate, gid);
+        std::string url;
+        if (g_active == &g_custom) {
+            url.assign(p.urlTemplate);
+            const std::string id = std::to_string(gid);
+            for (size_t pos = 0; (pos = url.find("{gid}", pos)) != std::string::npos;)
+                url.replace(pos, 5, id);
+        } else {
+            char urlLog[256];
+            std::snprintf(urlLog, sizeof(urlLog), p.urlTemplate, gid);
+            url.assign(urlLog);
+        }
 
         auto r = OSTPlatform::Http::Execute(
             L"GET",
-            urlLog,
+            url.c_str(),
             nullptr,
             0,
             nullptr,
