@@ -2,6 +2,7 @@
 #include "dllmain.h"
 
 #include "OSTPlatform/include/DynamicLibrary.h"
+#include "OSTPlatform/include/Encoding.h"
 #include "Utils/Config/Config.h"
 #include "Utils/Config/LuaConfig.h"
 #include "Utils/Logging/Log.h"
@@ -64,30 +65,26 @@ namespace {
 
     std::filesystem::path ResolveLibraryPath(const std::string& steamRoot,
                                              const std::string& configured) {
-        if (configured.empty()) {
-            if (DllDir[0] != '\0') {
-                auto p = std::filesystem::path(DllDir) / "cloud_redirect.dll";
-                if (std::filesystem::exists(p)) return p;
-            }
-            if (ConfigPath[0] != '\0') {
-                auto p = std::filesystem::path(ConfigPath).parent_path() / "cloud_redirect.dll";
-                if (std::filesystem::exists(p)) return p;
-            }
-            return std::filesystem::path(steamRoot) / "cloud_redirect.dll";
+        std::error_code ec;
+        const std::string filename = configured.empty() ? "cloud_redirect.dll" : configured;
+        const std::filesystem::path lib(OSTPlatform::Encoding::Utf8ToWide(filename));
+        if (lib.is_absolute()) {
+            return lib;
         }
 
-        std::filesystem::path lib(configured);
-        if (lib.is_absolute())
-            return lib;
         if (DllDir[0] != '\0') {
-            auto p = std::filesystem::path(DllDir) / lib;
-            if (std::filesystem::exists(p)) return p;
+            const auto p = std::filesystem::path(OSTPlatform::Encoding::Utf8ToWide(DllDir)) / lib;
+            if (std::filesystem::exists(p, ec) && !ec) return p;
         }
         if (ConfigPath[0] != '\0') {
-            auto p = std::filesystem::path(ConfigPath).parent_path() / lib;
-            if (std::filesystem::exists(p)) return p;
+            const auto configParent = std::filesystem::path(OSTPlatform::Encoding::Utf8ToWide(ConfigPath)).parent_path();
+            const auto steamRootPath = std::filesystem::path(OSTPlatform::Encoding::Utf8ToWide(steamRoot));
+            if (configParent != steamRootPath) {
+                const auto p = configParent / lib;
+                if (std::filesystem::exists(p, ec) && !ec) return p;
+            }
         }
-        return std::filesystem::path(steamRoot) / lib;
+        return std::filesystem::path(OSTPlatform::Encoding::Utf8ToWide(steamRoot)) / lib;
     }
 
     template <typename T>
@@ -118,15 +115,17 @@ void Initialize(const char* steamInstallPath) {
     if (g_active.load(std::memory_order_acquire)) return;
 
     const std::filesystem::path libPath = ResolveLibraryPath(steamInstallPath, cloud.library);
-    if (!std::filesystem::exists(libPath)) {
-        LOG_WARN("CloudRedirect: cloud_redirect.dll not found at {}", libPath.string());
+    std::error_code libEc;
+    const std::string libPathUtf8 = OSTPlatform::Encoding::WideToUtf8(libPath.wstring());
+    if (!std::filesystem::exists(libPath, libEc) || libEc) {
+        LOG_WARN("CloudRedirect: cloud_redirect.dll not found at {}", libPathUtf8);
         return;
     }
 
     g_module = OSTPlatform::DynamicLibrary::Load(libPath);
     if (!g_module) {
         LOG_WARN("CloudRedirect: failed to load {} (err={})",
-                 libPath.string(), OSTPlatform::DynamicLibrary::GetLastErrorCode());
+                 libPathUtf8, OSTPlatform::DynamicLibrary::GetLastErrorCode());
         return;
     }
 
@@ -158,7 +157,7 @@ void Initialize(const char* steamInstallPath) {
 
     g_active.store(true, std::memory_order_release);
     LOG_INFO("CloudRedirect: loaded {} and initialised cloud save redirection (diversion: {:p})",
-             libPath.string(), static_cast<void*>(client_hModule));
+             libPathUtf8, static_cast<void*>(client_hModule));
 
     if (g_enableStatsSync) {
         g_enableStatsSync(true, true);
@@ -233,6 +232,18 @@ void Shutdown() {
     std::lock_guard lock(g_mutex);
     if (!g_active.exchange(false)) return;
     if (g_shutdownFn) g_shutdownFn();
+    g_initCloudSave      = nullptr;
+    g_handleCloudRpc     = nullptr;
+    g_setApps            = nullptr;
+    g_isApp              = nullptr;
+    g_shutdownFn         = nullptr;
+    g_enableStatsSync    = nullptr;
+    g_setAccountId       = nullptr;
+    g_notifyAppRunning   = nullptr;
+    g_notifyStatsStored  = nullptr;
+    g_getAchievements    = nullptr;
+    g_installVtableHooks = nullptr;
+    g_module             = nullptr;
     LOG_INFO("CloudRedirect: shut down");
 }
 
