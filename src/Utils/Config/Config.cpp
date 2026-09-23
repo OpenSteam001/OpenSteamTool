@@ -4,6 +4,7 @@
 
 #include <toml++/toml.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <mutex>
 
@@ -34,6 +35,23 @@ namespace {
         case LogLevel::Error: return "error";
         }
         return "???";
+    }
+
+    // WinHTTP reads a zero timeout as "no timeout at all", and a negative TOML
+    // value would wrap into a huge uint32 on the cast — either way one phase
+    // could outlive the fetch budget the net-packet hook waits on, pinning a
+    // worker thread for the rest of the session. Clamp at the entry point and
+    // say so, rather than silently honouring a value that cannot work.
+    void ReadTimeoutMs(const toml::table& manifest, const char* key, uint32_t& out) {
+        const auto val = manifest[key].value<int64_t>();
+        if (!val) return;
+
+        constexpr int64_t kMin = 1;
+        constexpr int64_t kMax = ManifestClient::kFetchBudgetMs;
+        if (*val < kMin || *val > kMax) {
+            LOG_WARN("manifest.{} = {} is outside [{}, {}], clamping", key, *val, kMin, kMax);
+        }
+        out = static_cast<uint32_t>(std::clamp<int64_t>(*val, kMin, kMax));
     }
 
     Snapshot MakeDefaultSnapshot(const std::string& configPath) {
@@ -102,14 +120,10 @@ namespace {
                 if (auto val = (*manifest)["url"].value<std::string>()) {
                     snapshot.manifestProvider = *val;
                 }
-                if (auto val = (*manifest)["timeout_resolve_ms"].value<int64_t>())
-                    snapshot.manifestTimeouts.resolve = static_cast<uint32_t>(*val);
-                if (auto val = (*manifest)["timeout_connect_ms"].value<int64_t>())
-                    snapshot.manifestTimeouts.connect = static_cast<uint32_t>(*val);
-                if (auto val = (*manifest)["timeout_send_ms"].value<int64_t>())
-                    snapshot.manifestTimeouts.send = static_cast<uint32_t>(*val);
-                if (auto val = (*manifest)["timeout_recv_ms"].value<int64_t>())
-                    snapshot.manifestTimeouts.recv = static_cast<uint32_t>(*val);
+                ReadTimeoutMs(*manifest, "timeout_resolve_ms", snapshot.manifestTimeouts.resolve);
+                ReadTimeoutMs(*manifest, "timeout_connect_ms", snapshot.manifestTimeouts.connect);
+                ReadTimeoutMs(*manifest, "timeout_send_ms",    snapshot.manifestTimeouts.send);
+                ReadTimeoutMs(*manifest, "timeout_recv_ms",    snapshot.manifestTimeouts.recv);
             }
 
             // [log]

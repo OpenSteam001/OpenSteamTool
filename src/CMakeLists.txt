@@ -86,6 +86,22 @@ add_custom_command(
 )
 
 # ---------------------------------------------------------------------------
+# Source and execution charset: every file in this tree is UTF-8, so say so
+# explicitly instead of letting MSVC guess the machine's ANSI code page
+# (cp936, cp1252, ...). Without this, non-ASCII bytes in comments and literals
+# are mis-decoded on non-Latin-1 locales, and a mis-decoded comment can swallow
+# the following line of code — the U+2550 banner in Hook/Hooks_Manifest.cpp
+# ends on byte 0x90, which cp936 reads as a double-byte lead and absorbs the
+# newline, hiding "namespace {" and breaking the build.
+#
+# Placed after the dependency recipes and the tools subdirectory, so it covers
+# this directory and OSTPlatform only — third-party sources keep their own flags.
+# ---------------------------------------------------------------------------
+if(MSVC)
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:/utf-8>")
+endif()
+
+# ---------------------------------------------------------------------------
 # OSTPlatform — internal static library that owns the OS-specific backends.
 # Its build is defined in its own module CMakeLists so this top-level file stays
 # focused on host-level products (the DLLs) and code generation.

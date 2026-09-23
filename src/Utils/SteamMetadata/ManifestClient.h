@@ -7,9 +7,28 @@
 //  Provider table is internal (see kProviders in ManifestClient.cpp);
 //  adding a new provider only requires one row there.
 //
-//  Thread-safe — serialises access to the underlying WinHTTP connection.
+//  Fetches walk the provider table and fall back to the next entry
+//  when one fails, so a single dead upstream no longer breaks depot
+//  downloads.
+//
+//  Thread-safe, and concurrent fetches do run concurrently: each HTTP
+//  request owns its own WinHTTP session, so nothing is serialised
+//  except the provider state and the shared lua_State.  A dead upstream
+//  therefore costs every waiting depot one timeout in parallel, not one
+//  timeout each in sequence.
 // ─────────────────────────────────────────────────────────────────
 namespace ManifestClient {
+
+    // Wall-clock budget for one whole fetch, i.e. every provider attempt
+    // combined.  The net-packet hook waits slightly longer than this
+    // before it gives up and lets Steam's original response through, so
+    // raising it here also has to be reflected there (see kMaxWaitMs in
+    // Hooks_NetPacket.cpp, which derives from this value).
+    constexpr uint32_t kFetchBudgetMs = 11000;
+
+    // How long a provider is skipped after a failed attempt.  Keeps a
+    // dead upstream costing one timeout instead of one per depot.
+    constexpr uint32_t kProviderCooldownMs = 60000;
 
     // Select the active provider by its string name (matches kProviders[i].name).
     // Returns false if no provider matches; the previous selection is kept.

@@ -142,9 +142,13 @@ level = "info"
 
 [manifest]
 # 仓库 manifest 请求码的上游 API。选项："opensteamtool"、"steamrun"、"wudrm"
+# 只决定优先尝试哪个上游：失败时会依次尝试其余上游，应答成功者成为新的首选。
+# 刚失败过的上游会在 60 秒内被跳过。
 url = "opensteamtool"
 
 # manifest 请求的 HTTP 超时（毫秒）
+# 单次取码（含所有上游回退）整体上限为 11 秒，因此这里是单次尝试的上限，
+# 而不是各项之和。
 timeout_resolve_ms = 5000
 timeout_connect_ms = 5000
 timeout_send_ms    = 10000

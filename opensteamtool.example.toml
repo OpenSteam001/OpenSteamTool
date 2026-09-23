@@ -51,6 +51,11 @@ url = "opensteamtool"
 # timeout_connect_ms  — TCP handshake          (default: 5000)
 # timeout_send_ms     — request transmission   (default: 10000)
 # timeout_recv_ms     — response body download (default: 10000)
+# Each value must be between 1 and 11000 (the whole-fetch budget); anything
+# outside that is clamped with a warning in the log. In particular 0 does NOT
+# mean "no limit" — WinHTTP would read it as an infinite wait, so it is
+# rejected. One request tries several providers in turn, and all attempts
+# together share the 11000 ms budget.
 timeout_resolve_ms = 5000
 timeout_connect_ms = 5000
 timeout_send_ms    = 10000

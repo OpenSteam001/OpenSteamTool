@@ -141,9 +141,14 @@ level = "info"
 
 [manifest]
 # Upstream API for depot manifest request codes.  Options: "opensteamtool", "steamrun", "wudrm"
+# Only sets which upstream is tried first — if it fails, the others are tried
+# in turn and the one that answers becomes the new first choice.  A provider
+# that just failed is skipped for 60 s.
 url = "opensteamtool"
 
-# HTTP timeouts for manifest requests (milliseconds)
+# HTTP timeouts for manifest requests (milliseconds).
+# One whole fetch (every upstream tried, including fallbacks) is also capped
+# at 11 s total, so these are upper bounds for a single attempt, not a sum.
 timeout_resolve_ms = 5000
 timeout_connect_ms = 5000
 timeout_send_ms    = 10000
