@@ -30,6 +30,9 @@ namespace {
     //  GetAppID reads and updates the response steamclient pre-filled.
     void HandlerPost_IClientUtils_GetAppID(CPipeClient* pipe, CUtlBuffer* pRead, CUtlBuffer* pWrite)
     {
+        // Once P2P is up, leave 480 so the socket matches the 480 session cert.
+        if (Hooks_Misc::ShouldReportOnlineFixAppId()) return;
+
         AppId_t realAppId = Hooks_Misc::ResolveAppId();
         if (!realAppId) return;
 

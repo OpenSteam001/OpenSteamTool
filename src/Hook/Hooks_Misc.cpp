@@ -15,6 +15,8 @@ namespace {
     // Assumes one game at a time.  Set by SpawnProcess VEH when -onlinefix
     // is detected; cleared when a non-onlinefix game launches.
     AppId_t   g_OnlineFixRealAppId;
+    // True once the game starts SteamNetworkingSockets P2P (see GetAppID handler).
+    bool      g_NetworkingSocketsActive;
     std::unordered_map<AppId_t, std::string> g_GameNameCache;
 
 
@@ -28,9 +30,10 @@ namespace {
         AppId_t appId = static_cast<AppId_t>(pGameID->AppID(true));
         const char* cmdLine = VehCommon::GetArg<const char*>(ctx, 3);
 
-        if (LuaConfig::HasDepot(appId) && cmdLine && strstr(cmdLine, "-onlinefix")) 
+        if (cmdLine && strstr(cmdLine, "-onlinefix"))
         {
             g_OnlineFixRealAppId = appId;
+            g_NetworkingSocketsActive = false;
             pGameID->SetAppID(kOnlineFixAppId);
             LOG_MISC_INFO("SpawnProcess: appid {} -> {}, cmd=\"{}\"",appId, kOnlineFixAppId, cmdLine);
         } else {
@@ -139,6 +142,21 @@ namespace Hooks_Misc {
     AppId_t ResolveAppId() {
         if (g_OnlineFixRealAppId) return g_OnlineFixRealAppId;
         return GetAppIDForCurrentPipeWrap();
+    }
+
+    bool IsOnlineFixActive() {
+        return g_OnlineFixRealAppId != 0;
+    }
+
+    void NotifyNetworkingSocketsUsed() {
+        if (g_OnlineFixRealAppId && !g_NetworkingSocketsActive) {
+            g_NetworkingSocketsActive = true;
+            LOG_MISC_INFO("NetworkingSockets active: GetAppID now reports 480 for cert match");
+        }
+    }
+
+    bool ShouldReportOnlineFixAppId() {
+        return g_OnlineFixRealAppId != 0 && g_NetworkingSocketsActive;
     }
     
     bool EnsureBufferCapacity(CUtlBuffer* pWrite, uint32 newCapacity,bool updatePut)

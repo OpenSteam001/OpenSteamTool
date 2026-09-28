@@ -916,7 +916,7 @@ namespace Hooks_NetPacket_OnlineFix {
             // Fill game_extra_info with the real game name.
             if (appid == kOnlineFixAppId) {
                 AppId_t realAppId = Hooks_Misc::ResolveAppId();
-                if (realAppId && LuaConfig::HasDepot(realAppId)) {
+                if (realAppId && realAppId != kOnlineFixAppId) {
                     std::string name = Hooks_Misc::GetGameNameByAppID(realAppId);
                     if (!name.empty()) {
                         game->set_game_extra_info(name);

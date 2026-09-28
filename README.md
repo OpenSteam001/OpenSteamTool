@@ -48,8 +48,7 @@
 - Adding, modifying, deleting, or overwriting `.lua` files in any watched directory automatically triggers a reload. No restart, no offline/online toggle needed.
 
 ### Injection
-- Add optional game-process library injection through `[inject]` in `opensteamtool.toml`.
-- Configure `enabled`, `library_x64`, and `library_x86`; the injected library must match the target process architecture.`library_x64` and `library_x86` may be absolute paths, or relative paths resolved from the Steam root directory.
+- Load third-party DLLs into game processes through `[[inject]]` in `opensteamtool.toml`. See [Third-party DLL injection](#third-party-dll-injection).
 
 ### Family Sharing and Remote Play
 - Bypass Steam Family Sharing restrictions for games that have been added to the library with `addappid` in Lua. All accounts in the Steam Family that participate in sharing must use OpenSteamTool for this to work.
@@ -161,15 +160,30 @@ enable_api = true
 paths = []
 
 [inject]
-# Optional library injection into game processes.
-# The injected library must match the target process architecture.
-enabled = false
-# library_x64 = "OpenSteamTool.GameHook.x64.dll"
-# library_x86 = "OpenSteamTool.GameHook.x86.dll"
+# Optional DLL injection into game processes. See "Third-party DLL injection" below.
+# [[inject]]
+# path = "{your_dll}.dll"
 
 # Optional metadata mirror. See "Steam version compatibility" below.
 [remote]
 # url_template = "https://your.server/{channel}/{component}/{sha256}.toml"
+```
+
+### Third-party DLL injection
+
+OpenSteamTool can load third-party DLLs into game processes. Each `[[inject]]` entry is injected when every condition it sets matches the launch; matching entries are injected in listed order.
+
+| Key | Explanation |
+|-----|---------|
+| `path` | DLL to load. A bare file name resolves next to `steam.exe`; an absolute path is used as-is. Missing files are skipped. |
+| `when_cmdline` | Substring that must appear in the launch command line. Omit to match any. |
+| `when_appids` | AppIds to restrict to. Omit/leave empty to match any. |
+| `all_games` | `false` (default) injects only into games added by the manifest; `true` injects into every game you launch. |
+
+```toml
+[[inject]]
+path = "OnlineFix.dll"
+when_cmdline = "-onlinefix"
 ```
 
 ### Manifest via Lua
@@ -242,6 +256,7 @@ Debug builds write per-module log files under `<Steam>/opensteamtool/`:
 | `onlinefix.log`     | `LOG_ONLINEFIX_*` | Online fix (480 AppId spoofing) |
 | `richpresence.log`  | `LOG_RICHPRESENCE_*` | Rich Presence packet construction and injection |
 | `steamui.log`       | `LOG_STEAMUI_*` | SteamUI hook diagnostics |
+| `inject.log`        | `LOG_INJECT_*` | Third-party DLL injection (`[[inject]]`) matching and results |
 | `pipe.log`          | `LOG_PIPE_*` | Pipe handshakes, process inspection, Denuvo authorization, library injection |
 | `platform.log`      | `LOG_PLATFORM_*` | Platform helper diagnostics, including remote-process operations |
 
