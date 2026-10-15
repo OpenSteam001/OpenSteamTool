@@ -6,6 +6,7 @@
 #include "Utils/Tickets/AppTicket.h"
 #include "Utils/Support/FnvHash.h"
 #include "Utils/CloudRedirect/CloudRedirectHost.h"
+#include "OSTPlatform/include/Memory.h"
 #include <chrono>
 #include <cstring>
 #include <deque>
@@ -79,6 +80,32 @@ namespace {
         pBody  = data + off;
         cbBody = size - off;
         return true;
+    }
+
+    // ── CNetPacket layout ──────────────────────────────────────
+    // Older Steam builds: m_pubData is at +0x08 (right after m_hConnection).
+    // Newer builds (seen in 1791918634): 8 more bytes precede the same fields,
+    // so m_pubData/m_cubData/m_cRef/m_pubNetworkBuffer/m_pNext all sit at +8.
+    // All code below is written against the old struct, so RecvPkt converts the
+    // raw pointer into a "fields" pointer first (PacketFields) and hands the
+    // raw pointer back to Steam (PacketRaw).
+    //
+    // Layout is told apart by the qword at +0x08: in the old layout it is the
+    // data pointer (readable memory); in the new one it is part of the extra
+    // header and never a valid pointer (observed: 0x00000000ffffffff and similar).
+    int g_NetPacketBias = 0;   // bytes between raw CNetPacket* and field view
+
+    inline CNetPacket* PacketFields(CNetPacket* raw)
+    {
+        const auto* qwords = reinterpret_cast<const uintptr_t*>(raw);
+        const bool oldLayout = OSTPlatform::Memory::IsReadable(reinterpret_cast<const void*>(qwords[1]), 1);
+        g_NetPacketBias = oldLayout ? 0 : 8;
+        return reinterpret_cast<CNetPacket*>(reinterpret_cast<uint8*>(raw) + g_NetPacketBias);
+    }
+
+    inline CNetPacket* PacketRaw(CNetPacket* fields)
+    {
+        return reinterpret_cast<CNetPacket*>(reinterpret_cast<uint8*>(fields) - g_NetPacketBias);
     }
 
     // ── Incoming: replace header and/or body (ring-buffer pool) ──
@@ -1316,15 +1343,23 @@ namespace {
         return result;
     }
 
-    HOOK_FUNC(RecvPkt, void*, void* pThis, CNetPacket* pPacket)
+    HOOK_FUNC(RecvPkt, void*, void* pThis, CNetPacket* pRawPacket)
     {
+        // pPacket is the field view; Steam must always be given pRawPacket.
+        CNetPacket* pPacket = PacketFields(pRawPacket);
+
+        // Unknown layout / empty packet: hand it to Steam untouched rather
+        // than dereference a pointer we cannot trust.
+        if (!OSTPlatform::Memory::IsReadable(pPacket->m_pubData, sizeof(MsgHdr)))
+            return oRecvPkt(pThis, pRawPacket);
+
         Hooks_NetPacket_RichPresence::TryInject(
             pThis, pPacket,
-            [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, pP) != nullptr; });
+            [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, PacketRaw(pP)) != nullptr; });
 
         Hooks_NetPacket_Cloud::Drain(
             pThis, pPacket,
-            [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, pP) != nullptr; });
+            [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, PacketRaw(pP)) != nullptr; });
 
         EMsg eMsg;
         const uint8 *pBody, *pHdr;
@@ -1350,7 +1385,7 @@ namespace {
             }
         }
 
-        return oRecvPkt(pThis, pPacket);
+        return oRecvPkt(pThis, pRawPacket);
     }
 
 } // anonymous namespace

@@ -206,6 +206,10 @@ struct IKeyValuesSystem {
 };
 using KeyValuesSystemSteam_t = IKeyValuesSystem* (*)();
 
+// Field layout of the older CNetPacket. Newer Steam builds (e.g. 1791918634)
+// insert 8 extra bytes before m_pubData, shifting every field after
+// m_hConnection by +8; Hooks_NetPacket normalises that via
+// PacketFields()/PacketRaw().
 struct CNetPacket
 {
 	HCONNECTION m_hConnection;
