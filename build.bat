@@ -24,8 +24,10 @@ if "%CONFIGS%"=="" set "CONFIGS=Release Debug"
 echo [INFO] Configuring with generator: %GENERATOR%
 echo "%GENERATOR%" | findstr /I /C:"Visual Studio" >nul
 if not errorlevel 1 (
+    set "EXTRACT_TICKETS_TARGET=tools/extract_tickets"
     cmake -S src -B build -G "%GENERATOR%" -A %ARCH%
 ) else (
+    set "EXTRACT_TICKETS_TARGET=extract_tickets"
     cmake -S src -B build -G "%GENERATOR%"
 )
 if errorlevel 1 goto :fail
@@ -38,8 +40,9 @@ for %%C in (%CONFIGS%) do (
     REM extract_tickets is EXCLUDE_FROM_ALL, so build it explicitly. It lands in
     REM build\tools\%%C\ rather than the shipped output directory.
     echo [INFO] Building tool extract_tickets for %%C
-    cmake --build build --config %%C --target extract_tickets
+    cmake --build build --config %%C --target %EXTRACT_TICKETS_TARGET%
     if errorlevel 1 goto :fail
+    echo [OK] DLL output: "%~dp0build\%%C"
 )
 
 echo [OK] Build completed successfully.

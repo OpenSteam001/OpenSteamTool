@@ -93,7 +93,8 @@ enabled = false
 # library = "cloud_redirect.dll"
 
 [remote]
-# Optional metadata mirror. Leave unset to use GitHub with jsDelivr fallback.
+# Optional metadata mirror. Leave unset to use the local cache first, then
+# GitHub, jsDelivr, and git.lua.tools when the cache is missing or unusable.
 # A custom mirror replaces the built-in remote sources and must include all
 # three placeholders: {channel}, {component}, and {sha256}.
 #

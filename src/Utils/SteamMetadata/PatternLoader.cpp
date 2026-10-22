@@ -158,7 +158,7 @@ static void ShowDownloadFailedPopup(const std::string& dllName,
         "  2. Drop a matching TOML at:\n"
         "       <Steam>\\opensteamtool\\pattern\\" + component + "\\" + sha256 + ".toml\n"
         "  3. Check upstream:\n"
-        "       https://github.com/OpenSteam001/steam-monitor/tree/pattern/" + component + "\n"
+        "       https://github.com/madoiscool/steam-monitor/tree/pattern/" + component + "\n"
         "  4. Report the diagnostics below:\n"
         "       https://github.com/OpenSteam001/OpenSteamTool/issues");
 }
@@ -180,6 +180,8 @@ bool Load(OSTPlatform::DynamicLibrary::ModuleHandle module, const std::string& d
         kPatternChannel,
         component,
         dllPath,
+    }, [&](const std::string& body) {
+        return !ParsePatternString(body).empty();
     });
 
     if (r.ok) {
@@ -187,7 +189,7 @@ bool Load(OSTPlatform::DynamicLibrary::ModuleHandle module, const std::string& d
         PatternMap map = ParsePatternString(r.body, &parseErr);
         if (!map.empty()) {
             LOG_INFO("PatternLoader: loaded {} patterns for {} ({})",
-                     map.size(), component, r.fromCache ? "cache fallback" : "remote");
+                     map.size(), component, r.fromCache ? "local cache" : "remote");
             g_moduleMaps[module] = std::move(map);
             return true;
         }

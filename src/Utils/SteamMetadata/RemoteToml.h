@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <string>
 
 namespace RemoteToml {
@@ -16,7 +17,9 @@ namespace RemoteToml {
         std::string sha256;
     };
 
-    // Fetch remote TOML first, then fall back to the exact local cache entry.
-    Result Fetch(const Request& request);
+    // Use the exact local cache entry when the loader accepts it; otherwise fetch remote.
+    // Only accepted remote content is written to the cache.
+    Result Fetch(const Request& request,
+                 const std::function<bool(const std::string&)>& load);
 
 } // namespace RemoteToml

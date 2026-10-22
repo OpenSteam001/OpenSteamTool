@@ -21,3 +21,4 @@ build/
 
 # DLLs (keep only source files)
 !.deps/**/*.dll
+list.md

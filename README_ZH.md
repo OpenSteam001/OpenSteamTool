@@ -196,25 +196,26 @@ C++ 运行时提供两个 Lua 辅助函数：
 
 ### Steam 版本兼容性
 
-OpenSteamTool 不再在 DLL 中内置字节模式签名。相反，每次启动时它计算磁盘上 `steamclient64.dll` 和 `steamui.dll` 的 SHA-256，并从上游跟踪器 [`OpenSteam001/steam-monitor`](https://github.com/OpenSteam001/steam-monitor)（`pattern` 分支）查找匹配的模式文件
+OpenSteamTool 不在 DLL 中内置字节模式签名。每次启动按磁盘上 `steamclient64.dll` 和 `steamui.dll` 的 SHA-256 查找对应的本地 TOML；只有缓存缺失、为空或加载解析不可用时，才请求远端。`pattern` 和 `ipc` 均使用此策略。
 
 查找顺序（每次启动）：
 
-1. **GitHub raw** — `https://raw.githubusercontent.com/OpenSteam001/steam-monitor/pattern/...`。规范来源
-2. **jsDelivr CDN** — 如果 GitHub raw 无法访问（连接拒绝/超时/5xx）时自动回退。无需配置。在 `raw.githubusercontent.com` 被封锁但 jsDelivr 可访问的地区很有用（如中国大陆）
-3. **本地缓存** — `<Steam>\opensteamtool\pattern\<subdir>\<sha256>.toml`。仅当远程不可达时使用。每次成功远程获取后覆盖缓存
+1. **本地缓存** — `<Steam>\opensteamtool\<channel>\<component>\<sha256>.toml`。可用时直接使用，不发起 HTTP 请求。
+2. **GitHub raw** — `https://raw.githubusercontent.com/madoiscool/steam-monitor/{channel}/{component}/{sha256}.toml`。
+3. **jsDelivr CDN** — GitHub 请求失败时尝试。
+4. **git.lua.tools** — 前面的远端请求失败时尝试；保留原有 HTTP 404 立即停止镜像链的行为。
 
-每次启动都会咨询远程，因此用户自动获取上游重新发布（例如机器人添加新签名或修复现有签名），无需清除任何缓存
+远端内容通过对应加载器的解析检查后写入缓存，后续启动直接使用本地文件。同版本的远端重新发布不会自动覆盖可用缓存；需要强制刷新时，移走该版本对应的 TOML 后重启 Steam。
 
-如果某步返回 **HTTP 404**，镜像循环立即停止——所有镜像提供相同内容，因此 404 意味着上游机器人尚未为此 Steam 版本发布 TOML。代码然后回退到本地缓存（如果存在）；否则出现一次性弹窗，显示不匹配的 DLL 名称、其 SHA-256、预期缓存路径和上游 URL。仅禁用与该 DLL 相关的钩子——OpenSteamTool 的其余部分继续工作
+本地不可用且远端获取失败时，保留原有弹窗及按模块停用钩子的处理。HTTP 404 仍立即停止镜像循环。
 
-如果你知道给定版本的布局，也可以手动将模式 TOML 放入缓存目录；文件名必须为 `<sha256>.toml`。下次远程不可达时缓存回退会拾取它
+也可手动将匹配版本的 TOML 放入缓存目录；文件名必须为 `<sha256>.toml`，下次启动优先使用。
 
-> 每次启动执行简短的出站 HTTPS 请求（每个 DLL 一个：`steamclient64.dll`、`steamui.dll`）。下载的内容很小（每个约 10 KB），工作在线程上运行，因此永远不会阻塞 Steam 加载器
+> Steam DLL 更新后会查找新版本对应的文件，不沿用旧版地址。缓存可用时不依赖云端；本地和远端均无可用数据时，无法保证相关钩子生效。
 
 #### 使用不同的镜像
 
-对大多数用户来说，内置的 **GitHub -> jsDelivr** 回退已经足够。要使用私有镜像或内网服务器，配置完整的 URL 模板。自定义镜像替换内置远程源；本地缓存回退仍然可用
+默认顺序是 **本地缓存 -> GitHub -> jsDelivr -> git.lua.tools**。自定义 URL 模板只替换远端源，不改变本地优先策略。
 
 模板必须包含 `{channel}`、`{component}` 和 `{sha256}`。当前使用的通道是 `pattern` 和 `ipc`
 

@@ -14,10 +14,13 @@ namespace RemoteToml {
 
 namespace {
     constexpr const char* kGithubTemplate =
-        "https://raw.githubusercontent.com/OpenSteam001/steam-monitor/"
+        "https://raw.githubusercontent.com/madoiscool/steam-monitor/"
         "{channel}/{component}/{sha256}.toml";
     constexpr const char* kJsdelivrTemplate =
-        "https://cdn.jsdelivr.net/gh/OpenSteam001/steam-monitor@"
+        "https://cdn.jsdelivr.net/gh/madoiscool/steam-monitor@"
+        "{channel}/{component}/{sha256}.toml";
+    constexpr const char* kLuaToolsTemplate =
+        "https://git.lua.tools/luatools/steam-monitor/raw/branch/"
         "{channel}/{component}/{sha256}.toml";
 
     static bool HasPlaceholder(std::string_view text, std::string_view placeholder)
@@ -57,7 +60,7 @@ namespace {
     {
         const std::string remoteUrlTemplate = Config::GetRemoteUrlTemplate();
         if (remoteUrlTemplate.empty())
-            return { kGithubTemplate, kJsdelivrTemplate };
+            return { kGithubTemplate, kJsdelivrTemplate, kLuaToolsTemplate };
 
         if (!IsValidTemplate(remoteUrlTemplate)) {
             LOG_WARN("RemoteToml: remote.url_template must contain "
@@ -69,7 +72,8 @@ namespace {
     }
 } // namespace
 
-Result Fetch(const Request& request)
+Result Fetch(const Request& request,
+             const std::function<bool(const std::string&)>& load)
 {
     namespace fs = std::filesystem;
     Result out;
@@ -94,6 +98,24 @@ Result Fetch(const Request& request)
     fs::path cachePath = cacheDir / (out.sha256 + ".toml");
     const std::string cachePathText = cachePath.string();
 
+    // 3. A usable cache for this DLL needs no network access.
+    std::ifstream ifs(cachePath, std::ios::binary);
+    if (ifs) {
+        std::string buf((std::istreambuf_iterator<char>(ifs)),
+                         std::istreambuf_iterator<char>());
+        if (!buf.empty() && load(buf)) {
+            LOG_INFO("RemoteToml({}/{}): using local cache {}",
+                     request.channel, request.component, cachePathText);
+            out.body = std::move(buf);
+            out.ok = true;
+            out.fromCache = true;
+            return out;
+        }
+        LOG_WARN("RemoteToml({}/{}): cache empty or unusable: {}; fetching remote",
+                 request.channel, request.component, cachePathText);
+    }
+    ifs.close();
+
     std::error_code mkdirEc;
     fs::create_directories(cacheDir, mkdirEc);
     if (mkdirEc) {
@@ -101,7 +123,7 @@ Result Fetch(const Request& request)
                  request.channel, request.component, cacheDir.string(), mkdirEc.message());
     }
 
-    // 3. Try remote (mirror chain with early-out on 404).
+    // 4. No usable cache: try remote (mirror chain with early-out on 404).
     const std::vector<std::string> urlTemplates = BuildUrlTemplates();
     OSTPlatform::Http::Result http;
     std::string lastUrl;
@@ -114,7 +136,12 @@ Result Fetch(const Request& request)
         http = OSTPlatform::Http::Execute(L"GET", lastUrl.c_str(),
                                           nullptr, 0, nullptr);
 
-        if (http.ok && http.status == 200) break;
+        if (http.ok && http.status == 200) {
+            if (!http.body.empty() && load(http.body)) break;
+            LOG_WARN("RemoteToml({}/{}): unusable TOML from {}",
+                     request.channel, request.component, lastUrl);
+            http.ok = false;
+        }
 
         if (http.ok && http.status == 404) {
             LOG_WARN("RemoteToml({}/{}): mirror has no such file (HTTP 404): {}",
@@ -128,7 +155,7 @@ Result Fetch(const Request& request)
         }
     }
 
-    // 4. Remote OK → write cache, return body.
+    // 5. Accepted remote content → write cache, return body.
     if (http.ok && http.status == 200 && !http.body.empty()) {
         std::ofstream ofs(cachePath, std::ios::binary);
         if (ofs) {
@@ -143,31 +170,6 @@ Result Fetch(const Request& request)
         out.body = std::move(http.body);
         out.ok = true;
         return out;
-    }
-
-    // 5. Remote failed → fall back to whatever is cached for this exact SHA.
-    if (fs::exists(cachePath)) {
-        LOG_WARN("RemoteToml({}/{}): remote failed (last URL {} HTTP {}); "
-                 "falling back to local cache {}",
-                 request.channel, request.component,
-                 lastUrl.empty() ? "<none>" : lastUrl, http.status, cachePathText);
-
-        std::ifstream ifs(cachePath, std::ios::binary);
-        if (ifs) {
-            std::string buf((std::istreambuf_iterator<char>(ifs)),
-                             std::istreambuf_iterator<char>());
-            if (!buf.empty()) {
-                out.body = std::move(buf);
-                out.ok = true;
-                out.fromCache = true;
-                return out;
-            }
-            LOG_WARN("RemoteToml({}/{}): cache file empty: {}",
-                     request.channel, request.component, cachePathText);
-        } else {
-            LOG_WARN("RemoteToml({}/{}): could not open cache file: {}",
-                     request.channel, request.component, cachePathText);
-        }
     }
 
     // 6. Total failure — caller handles popup / degraded mode.

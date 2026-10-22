@@ -209,6 +209,8 @@ using KeyValuesSystemSteam_t = IKeyValuesSystem* (*)();
 struct CNetPacket
 {
 	HCONNECTION m_hConnection;
+	// Current Steam packet layout has an additional opaque slot before the payload.
+	uint64 m_unknown08;
 	uint8* m_pubData;
 	uint32 m_cubData;
 	int32 m_cRef;
