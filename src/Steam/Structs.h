@@ -206,9 +206,15 @@ struct IKeyValuesSystem {
 };
 using KeyValuesSystemSteam_t = IKeyValuesSystem* (*)();
 
+// Steam client 1791918634+ inserted an 8-byte field after m_hConnection:
+// m_pubData moved from +0x08 to +0x10 and m_cubData from +0x10 to +0x18
+// (steamclient64.dll reads them as [rcx+10h] / [rcx+18h] in the packet
+// processor called from RecvPkt). With the old layout, RecvPkt dereferenced
+// that field as the data pointer and crashed at OpenSteamTool.dll+0x52275.
 struct CNetPacket
 {
 	HCONNECTION m_hConnection;
+	uint8* m_pReservedNewField;
 	uint8* m_pubData;
 	uint32 m_cubData;
 	int32 m_cRef;
