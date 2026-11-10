@@ -1,4 +1,5 @@
 #include "IPCLoader.h"
+#include "IPCMetadataValidation.h"
 #include "IPCMessages.gen.h"
 #include "OSTPlatform/include/Numbers.h"
 #include "Utils/Logging/Log.h"
@@ -185,6 +186,14 @@ bool Load(const std::string& steamclientPath)
         if (!ParseInterfaceTable(key.str(), *val.as_table(), iface)) continue;
 
         g_registry.Add(std::move(iface));
+    }
+
+    // A syntactically valid TOML may contain no usable IPC methods.  Do not
+    // report that as a successful compatibility metadata load.
+    if (!IPCMetadataValidation::HasUsableMethods(g_registry.interfaces)) {
+        LOG_WARN("IPCLoader: IPC spec contains no usable methods; disabling IPC metadata");
+        g_registry.Clear();
+        return false;
     }
 
     LOG_INFO("IPCLoader: loaded {} methods across {} interfaces ({})",
