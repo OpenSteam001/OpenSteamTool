@@ -12,8 +12,8 @@ After parsing the metadata, `Load` now checks `MethodCount()`. When the count is
 
 - Inspect `src/Utils/SteamMetadata/IPCLoader.cpp` for the zero-method guard before the success log.
 - Build the Release configuration using `beginner-build.bat`; the change must compile without errors.
-- For future dedicated loader tests: use a syntactically valid empty TOML, a TOML with an unrecognized interface, and a valid metadata fixture with usable methods. The first two must return failure; the valid one must succeed.
+- Run `tests/ipc_metadata_policy_test.cpp` with MSVC and verify empty synthetic registries fail while nonempty registries pass. Full TOML loader fixtures are future work.
 
 ## Limits
 
-The repository currently lacks a standalone automated test harness for this loader, so the source-level regression cases above are not yet executed in isolation. The successful Windows build verifies compilation only. No Steam runtime, authorization or license behavior was altered or tested. This change does not generate missing signatures, repair unrelated CloudRedirect metadata, or guarantee compatibility with a particular Steam client release.
+A standalone C++ policy test exists at `tests/ipc_metadata_policy_test.cpp` and covers empty and nonempty synthetic registries. This verifies the production guard policy, not the full TOML parsing or live Steam initialization path. The successful Windows build verifies compilation only. No Steam runtime, authorization or license behavior was altered or tested. This change does not generate missing signatures, repair unrelated CloudRedirect metadata, or guarantee compatibility with a particular Steam client release.
