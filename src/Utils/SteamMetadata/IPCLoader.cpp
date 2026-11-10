@@ -187,6 +187,14 @@ bool Load(const std::string& steamclientPath)
         g_registry.Add(std::move(iface));
     }
 
+    // A syntactically valid TOML may contain no usable IPC methods.  Do not
+    // report that as a successful compatibility metadata load.
+    if (MethodCount() == 0) {
+        LOG_WARN("IPCLoader: IPC spec contains no usable methods; disabling IPC metadata");
+        g_registry.Clear();
+        return false;
+    }
+
     LOG_INFO("IPCLoader: loaded {} methods across {} interfaces ({})",
              MethodCount(), InterfaceCount(),
              r.fromCache ? "cache fallback" : "remote");
