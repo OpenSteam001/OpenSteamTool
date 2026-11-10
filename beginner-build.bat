@@ -22,7 +22,11 @@ if not defined GENERATOR (
 )
 set "PATH=%VSROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;%PATH%"
 echo [INFO] Selected generator: %GENERATOR%
-echo [INFO] Running build.bat. This compiles files but does not install into Steam.
 if /I "%~1"=="--check-only" (echo [OK] Build prerequisites and generator ready. & exit /b 0)
-call "%~dp0build.bat"
+if not defined _CL_ set "_CL_=/MP1"
+echo [INFO] Using compiler options: %_CL_%
+echo [INFO] Configuring a Release build without installing into Steam.
+cmake -S src -B build -G "%GENERATOR%" -A x64
+if errorlevel 1 exit /b 1
+cmake --build build --config Release --parallel 1
 exit /b %ERRORLEVEL%
