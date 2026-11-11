@@ -184,7 +184,19 @@ bool Load(const std::string& steamclientPath)
         Interface iface;
         if (!ParseInterfaceTable(key.str(), *val.as_table(), iface)) continue;
 
+        if (iface.methods.empty()) {
+            LOG_WARN("IPCLoader: [{}] has no usable methods; ignoring interface", iface.name);
+            continue;
+        }
         g_registry.Add(std::move(iface));
+    }
+
+    // An empty or incompatible TOML must never activate IPC interception.
+    if (g_registry.MethodCount() == 0) {
+        LOG_WARN("IPCLoader: no usable IPC methods in metadata; disabling IPC interception");
+        g_registry.Clear();
+        ShowMissingPopup(r.sha256);
+        return false;
     }
 
     LOG_INFO("IPCLoader: loaded {} methods across {} interfaces ({})",
