@@ -10,7 +10,7 @@ if not defined OST_DEPS_DIR set "OST_DEPS_DIR=%ROOT%\.deps"
 if not exist "%OST_DEPS_DIR%\tomlplusplus-src\include\toml++\toml.hpp" (
   echo CMake dependency cache missing. Set OST_DEPS_DIR or configure the project first.
   exit /b 2
-) 
+)
 call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat" >nul
 if errorlevel 1 exit /b 2
 set "TESTDIR=%TEMP%\ost-pattern-%RANDOM%-%RANDOM%"
