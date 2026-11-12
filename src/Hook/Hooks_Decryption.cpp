@@ -1,6 +1,7 @@
 #include "Hooks_Decryption.h"
 #include "HookMacros.h"
 #include "dllmain.h"
+#include "Utils/Tickets/AppTicket.h"
 #include <string>
 
 namespace {
@@ -30,6 +31,40 @@ namespace {
                     LOG_DECRYPTIONKEY_WARN("Decryption key for depot {} is too large ({} bytes) for buffer ({} bytes)",
                                             depotId, key.size(), KeySize);
                 }
+            }
+        }
+
+        // Expected shape: "apptickets\<AppId>"
+        // steamclient serves the game's ownership ticket from its local cache and
+        // only falls back to a CM round-trip when the cache misses. Games that go
+        // through this path (no IPC AppOwnershipTicket call at all) never see the
+        // forged response installed by Hooks_IPC_ISteamUser, so forge here too.
+        if (size_t pos = name.rfind("apptickets\\"); pos != std::string::npos) {
+            const std::string tail = name.substr(pos + sizeof("apptickets\\") - 1);
+            if (!tail.empty() && tail.find('\\') == std::string::npos) {
+                // A real ticket always wins: only forge when the cache misses.
+                const int32 cached = oConfigStoreGetBinary(pObject, eConfigStore, KeyName, Key, KeySize);
+                if (cached > 0) return cached;
+
+                AppId_t appId = 0;
+                try { appId = static_cast<AppId_t>(std::stoul(tail)); } catch (...) { appId = 0; }
+
+                // HasDepot's default excludes apps already marked owned — pass false
+                // so forge still applies after MarkOwned has run for this app.
+                if (appId != 0 && LuaConfig::HasDepot(appId, /*excludeOwned=*/false)) {
+                    AppTicket::AppOwnershipTicket ticket{};
+                    if (AppTicket::GetAppOwnershipTicket(appId, ticket, AppTicket::AppTicketSource::ForgeOnly)) {
+                        if (ticket.data.size() <= static_cast<size_t>(KeySize)) {
+                            memcpy(Key, ticket.data.data(), ticket.data.size());
+                            LOG_DECRYPTIONKEY_INFO("Forged appticket for AppId {}: {} bytes (declared {})",
+                                                   appId, ticket.data.size(), ticket.totalSize);
+                            return static_cast<int32>(ticket.data.size());
+                        }
+                        LOG_DECRYPTIONKEY_WARN("Forged appticket for AppId {} is too large ({} bytes) for buffer ({} bytes)",
+                                               appId, ticket.data.size(), KeySize);
+                    }
+                }
+                return cached;
             }
         }
         return oConfigStoreGetBinary(pObject, eConfigStore, KeyName, Key, KeySize);

@@ -129,6 +129,34 @@ namespace {
         return result;
     }
 
+    // SteamDRM (.bind) stubs are frozen at the client version the game shipped
+    // with, so they keep calling the legacy 1-arg variant of the ownership
+    // ticket call: IClientUser funcHash 0xC7E71244. Current steamclient builds
+    // expose 0x5578709F for the same method and older builds shipped
+    // 0xC7E71245 (2-arg), i.e. the hash is "name CRC + arg count" and only the
+    // method name differs — the wire layout is identical, as observed on the
+    // wire for appid 4348910:
+    //   req : <hdr> | 0xC7E71244 | unAppID=4348910 | cbMaxTicket=1024
+    //   resp: <hdr> | pTicket[1024] + piAppId/piSteamId/piSignature/pcbSignature
+    // Without an alias that call matches no handler, steamclient answers with an
+    // all-zero buffer (no ticket) and the DRM stub aborts the launch.
+    static void RegisterLegacyAliases() {
+        constexpr uint32 kLegacyOwnershipTicketHash = 0xC7E71244;
+        static constexpr char kOwnerName[] = "IClientUser::GetAppOwnershipTicketExtendedData";
+
+        for (size_t i = 0; i < g_Handlers.size(); ++i) {
+            if (g_Handlers[i].name != kOwnerName) continue;
+
+            ResolvedHandler alias = g_Handlers[i];
+            alias.funcHash = kLegacyOwnershipTicketHash;
+            g_Handlers.push_back(alias);
+
+            LOG_IPC_INFO("Hooks_IPC: aliased legacy SteamDRM ticket hash 0x{:08X} -> {}",
+                         alias.funcHash, kOwnerName);
+            break;
+        }
+    }
+
 } // namespace
 
 
@@ -141,6 +169,7 @@ namespace Hooks_IPC {
         // IPCLoader metadata happens inside RegisterHandlers.
         Hooks_IPC_ISteamUser::Register();
         Hooks_IPC_ISteamUtils::Register();
+        RegisterLegacyAliases();
 
         LOG_IPC_INFO("Hooks_IPC: {} handlers registered", g_Handlers.size());
 
